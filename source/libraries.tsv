@@ -1,0 +1,24 @@
+##FileFormat = OSCtable (sort of)
+##ColumnVariable[Name] = Library name to be used in expression tables, etc.
+##ColumnVariable[LSA_Name] = Library name used in the LS-Archive record.
+##ColumnVariable[Rev] = Protocol revision on ScriptHub (A or B).
+##ColumnVariable[LibID] = LS-Archive library identifier.
+##ColumnVariable[Sequence_Run_ID] = HiSeq sequence run identifier.
+##ColumnVariable[Lane] = Lane number in the HiSeq run.
+##ColumnVariable[Reads] = Number of reads passing filter.
+##ColumnVariable[PF] = Percentage of reads passing filter (from total).
+##ColumnVariable[C1_Run_ID] = C1 run identifier (serial number of the C1 array).
+##ColumnVariable[PC] = 96-well plate coordinate of the sample replaced by the positive control.
+##ColumnVariable[NC] = 96-well plate coordinate of the sample replaced by the negative control.
+##ColumnVariable[t00] = Color code of time point 0 hours.
+##ColumnVariable[t06] = Color code of time point 6 hours.
+##ColumnVariable[t24] = Color code of time point 24 hours.
+##ColumnVariable[Curation] = Initials of curator : what was curated.
+##ColumnVariable[Moirai_Stamp] = Timestamp of Moirai processing (OP-WORKFLOW-CAGEscan-short-reads-v2.0)
+Name	LSA_Name	Rev	LSID	Sequence_Run_ID	Lane	Reads	PF	C1_Run_ID	PC	NC	t00	t06	t24	Curation	Moirai_Stamp
+ERCC_1	4th_CAGE_I	A	RNhi10515	151106_SN554_0280_BC7WR7ACXX	8	NA	NA	1772-115-311	H06	H12	NA	NA	NA	NA	20161011125053
+ERCC_2	4th_CAGE_II	A	RNhi10515	151106_SN554_0280_BC7WR7ACXX	8	NA	NA	1772-115-314	H12	H10	NA	NA	NA	NA	20161011125053
+ERCC	4th_CAGE	A	RNhi10515	151106_SN554_0280_BC7WR7ACXX	8	197873219	88.97	NA	NA	NA	NA	NA	NA	NA	20161011125053
+CAGE_4	4th_CAGE	B	RNhi10538	160422_SN556_0382_BC8PH0ACXX	4,5	244715147	.	1772-123-072	H10	H11	G/R	Green	Red	.	20161011124649
+CAGE_5	5th_CAGE	B	RNhi10539	160422_SN556_0382_BC8PH0ACXX	6	121995949	.	1772-123-073	C10	C11	Green	Red	G/R	.	20161011124729
+CAGE_6	6th_CAGE	B	RNhi10540	160422_SN556_0382_BC8PH0ACXX	7,8	244301478	.	1772-123-074	C10	C11	Red	G/R	Green	.	20161011124808
