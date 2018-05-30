@@ -1,0 +1,21 @@
+##FileFormat = OSCtable (sort of)
+##ColumnVariable[Name] = Library name to be used in expression tables, etc.
+##ColumnVariable[LSA_Name] = Library name used in the LS-Archive record.
+##ColumnVariable[Rep] = Replicate number.
+##ColumnVariable[Time] = Time point.
+##ColumnVariable[Color] = Color code.
+##ColumnVariable[Barcode] = nAnTiCAGE multiplexing barcode.
+##ColumnVariable[LibID] = LS-Archive library identifier.
+##ColumnVariable[Sequence_Run_ID] = HiSeq sequence run identifier.
+##ColumnVariable[Lane] = Lane number in the HiSeq run.
+##ColumnVariable[Moirai_link] = String to be added to "http://osc-internal.gsc.riken.jp/quality_control/delivery/2648/Mapping/BWA/" in order to retreive the CTSS bed file.
+Name	LSA_Name	Rep	Time	Color	LibID	Barcode	Sequence_Run_ID	Lane	Moirai_link
+BULK_t24_2	A549_2nd_24hour_G/R	2	t24	G/R	CNhi10676	AGT	151211_SN556_0372_AC84UBACXX	2	CNhi10676.nAnT-iCAGE-bwa.20151215185238/ctss/CNhi10676_NoIndex_L002_R1_001.A549_2nd_24hour_G_R_AGT.ctss.bed
+BULK_t06_3	A549_3rd_6hour_G	3	t06	G	CNhi10677	GCT	151211_SN556_0372_AC84UBACXX	3	CNhi10677.nAnT-iCAGE-bwa.20151215185256/ctss/CNhi10677_NoIndex_L003_R1_001.A549_3rd_6hour_G_GCT.ctss.bed
+BULK_t00_2	A549_2nd_0hour_G	2	t00	G	CNhi10679	CAC	151211_SN556_0372_AC84UBACXX	5	CNhi10679.nAnT-iCAGE-bwa.20151215185331/ctss/CNhi10679_NoIndex_L005_R1_001.A549_2nd_0hour_G_CAC.ctss.bed
+BULK_t24_1	A549_1st_24hour_G	1	t24	G	CNhi10680	GCT	151211_SN556_0372_AC84UBACXX	6	CNhi10680.nAnT-iCAGE-bwa.20151215185348/ctss/CNhi10680_NoIndex_L006_R1_001.A549_1st_24hour_G_GCT.ctss.bed
+BULK_t06_1	A549_1st_6hour_G/R	1	t06	G/R	CNhi10681	AGT	151211_SN556_0372_AC84UBACXX	7	CNhi10681.nAnT-iCAGE-bwa.20151215185408/ctss/CNhi10681_NoIndex_L007_R1_001.A549_1st_6hour_G_R_AGT.ctss.bed
+BULK_t24_3	A549_3rd_24hour_R	3	t24	R	CNhi10682	ACC	151211_SN556_0372_AC84UBACXX	8	CNhi10682.nAnT-iCAGE-bwa.20151215185427/ctss/CNhi10682_NoIndex_L008_R1_001.A549_3rd_24hour_R_ACC.ctss.bed
+BULK_t00_3	A549_3rd_0hour_G/R	3	t00	G/R	CNhi10682	AGT	151211_SN556_0372_AC84UBACXX	8	CNhi10682.nAnT-iCAGE-bwa.20151215185427/ctss/CNhi10682_NoIndex_L008_R1_001.A549_3rd_0hour_G_R_AGT.ctss.bed
+BULK_t00_1	A549_1st_0hour_R	1	t00	R	CNhi10682	ATG	151211_SN556_0372_AC84UBACXX	8	CNhi10682.nAnT-iCAGE-bwa.20151215185427/ctss/CNhi10682_NoIndex_L008_R1_001.A549_1st_0hour_R_ATG.ctss.bed
+BULK_t06_2	A549_2nd_6hour_R	2	t06	R	CNhi10683	ACG	151211_SN556_0373_BC8CGDACXX	2	CNhi10683.nAnT-iCAGE-bwa.20151215185444/ctss/CNhi10683_NoIndex_L002_R1_001.A549_2nd_6hour_R_ACG.ctss.bed
