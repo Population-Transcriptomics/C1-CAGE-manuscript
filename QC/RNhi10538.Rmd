@@ -1,0 +1,28 @@
+---
+title: "RNhi10538"
+output: 
+  html_document: 
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+---
+
+```{r library_information_1}
+LIBRARY      <- "RNhi10538" 
+ZENBU_COLLAB <- "<Insert Zenbu collaboration ID>"
+WORKFLOW     <- "OP-WORKFLOW-CAGEscan-short-reads-v2.0"
+MOIRAI_STAMP <- "20160519001307"
+MOIRAI_PROJ  <- "Timecourse"
+MOIRAI_USER  <- "nano-fluidigm"
+ASSEMBLY     <- "hg38"
+
+GROUP_SHARED <- "/osc-fs_home/scratch/gmtu"
+GENE_SYMBOLS <- paste0(GROUP_SHARED, "/annotation/homo_sapiens/gencode-23/gencode.v23.annotation.genes.bed")
+ANNOTATION   <- paste0(GROUP_SHARED, "/annotation/homo_sapiens/gencode-23/gencode.v23.annotation.bed")
+
+RunA  <- "1772-123-072"
+ctrls <- list( RunA=list(posi="H10", nega="H11"))
+```
+
+```{r child = "QC_Template.Rmd"}
+```

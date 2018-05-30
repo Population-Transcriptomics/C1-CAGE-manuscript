@@ -1,0 +1,328 @@
+```{r echo=FALSE}
+knitr::opts_chunk$set(cache  = TRUE)
+knitr::opts_knit$set(verbose = TRUE)
+# knitr::opts_chunk$set(dev=c('svg', 'png'))
+options(width = 100)
+ggplot2::theme_set(ggplot2::theme_bw())
+```
+
+HiSeq run `r LIBRARY`
+=====================
+
+ - C1 run `r RunA`.
+ - Sequenced on HiSeq (`r LIBRARY`).
+
+ - Positive control (200 cells): `r ctrls$RunA$posi`.
+ - Negative control: `r ctrls$RunA$nega`.
+ 
+Jump directly to the [Analysis](#analysis) section if you are not
+interested in the details of the data processing.
+
+Data Processing
+===============
+
+Link files from MOIRAI.
+-----------------------
+
+```{r library_information_2}
+BASEDIR      <- "/osc-fs_home/scratch/moirai"
+MOIRAI_RUN   <- paste(LIBRARY, WORKFLOW, MOIRAI_STAMP, sep=".")
+MOIRAI_BASE  <- paste(BASEDIR, MOIRAI_USER, "project", MOIRAI_PROJ, MOIRAI_RUN, sep="/")
+MOIRAI_ID    <- paste(LIBRARY, WORKFLOW, MOIRAI_STAMP, sep=".")
+MOIRAI_FRAGS <- paste0(MOIRAI_BASE, "/CAGEscan_fragments")
+MOIRAI_BAM   <- paste0(MOIRAI_BASE, "/genome_mapped")
+MOIRAI_URL   <- paste0("http://moirai.gsc.riken.jp/", MOIRAI_BASE, "/", MOIRAI_RUN, ".html")
+
+smallCAGEqc::exportInEnv("LIBRARY", "MOIRAI_BASE", "GENE_SYMBOLS", "ANNOTATION")
+```
+
+Intranet link: [`r MOIRAI_RUN`](`r MOIRAI_URL`)
+
+Create a symbolic link from Moirai results to the working directory.
+
+```{r create_link, engine="bash"}
+[ -L $LIBRARY.l1.osc.gz ] ||
+  ln --symbolic $MOIRAI_BASE/$LIBRARY.l1.osc.gz
+```
+
+Annotation and gene symbols.
+----------------------------
+
+See also <https://gist.github.com/charles-plessy/9dbc8bc98fb773bf71b6>.
+
+```{r annotate_bed, engine="bash"}
+function osc2bed {
+  zcat $1 |
+    grep -v \# |
+    sed 1d |
+    awk '{OFS="\t"}{print $2, $3, $4, "l1", "1000", $5}'
+}
+
+function bed2annot {
+  bedtools intersect -a $1 -b $ANNOTATION -s -loj |
+    awk '{OFS="\t"}{print $1":"$2"-"$3$6,$10}' | 
+    bedtools groupby -g 1 -c 2 -o collapse
+}
+
+function bed2symbols {
+  bedtools intersect -a $1 -b $GENE_SYMBOLS -s -loj |
+    awk '{OFS="\t"}{print $1":"$2"-"$3$6,$10}' | 
+    bedtools groupby -g 1 -c 2 -o distinct
+}
+
+osc2bed $LIBRARY.l1.osc.gz | tee $LIBRARY.l1.bed | bed2annot - > $LIBRARY.l1.annot
+bed2symbols $LIBRARY.l1.bed > $LIBRARY.l1.genes
+```
+
+Data load and QC in R.
+======================
+
+Moirai metadata
+---------------
+
+```{r load_R_libraries, message=F}
+library(magrittr)
+library(oscR)
+library(smallCAGEqc)
+stopifnot(
+    packageVersion("oscR") >= "0.2.0"
+  , packageVersion("smallCAGEqc") >= "0.12.2"
+)
+library(data.table)
+library(reshape)
+library(ggplot2)
+library(vegan)
+library(plyr)
+```
+
+```{r load_libs_from_moirai}
+PROCESSED_DATA <- MOIRAI_BASE
+
+libs <- loadMoiraiStats(
+  multiplex = paste0( "/osc-fs_home/scratch/moirai/nano-fluidigm/input/"
+                    , LIBRARY
+                    , ".name_to_id.txt"))
+libs$Run <- RunA
+libs$Well <- sub(".*_", "", libs$samplename)
+libs$row <- sub(".", "", libs$Well)
+libs$column <- sub("..$", "", libs$Well)
+libs$library <- LIBRARY
+```
+
+Values in the `libs` table come from Moirai's `summary.txt` file, as
+follows:
+
+libs         Moirai
+------------ ---------------------------
+total        raw
+extracted    extracted
+cleaned      non_reference_extracted
+tagdust      filtered_for_artefact
+rdna         filtered_for_rrna
+spikes       filtered_for_spikes
+mapped       genome_mapped
+properpairs  properly_mapped
+counts       transcript_count
+
+Transcript counts (properly paired)
+-----------------------------------
+
+Note that `fread` needs to temporarly save an uncompressed copy of the file
+that is being read.  If there is not enough space in the temporary directory
+(often `\tmp`),  either uncompress the file first, or point to a larger
+directory to contain the temporary files (for example, run `R` with `TMPDIR=.
+R`).
+
+Note that _data.tables_ seem to be saved as simple _data frames_ when
+closing a session.  After restoring a workspace, one needs to re-convert with the `data.table` command.
+
+```{r load_osc_data}
+l1 <- fread.osc(paste0(LIBRARY, ".l1.osc.gz"), dropIdCoords=TRUE)
+
+setnames(l1, colnames(l1) %>% sub('raw.', '', .) %>% sub('.None', '', .))
+
+# Be sure that the "libs" and "l1" tables have matching names.
+stopifnot(all(colnames(l1) == rownames(libs)))
+```
+
+Annotation
+----------
+
+```{r annotate_l1}
+annot.l1 <- read.table(paste(LIBRARY,'l1','annot',sep='.'), head=F, col.names=c('id', 'feature'), row.names=1)
+annot.l1 <- hierarchAnnot(annot.l1)
+
+libs <- cbind(libs, t(rowsum(l1,  annot.l1[,'class']))[rownames(libs),])
+```
+
+Gene count
+----------
+
+```{r genesymbols_l1}
+genesymbols <- read.table(paste(LIBRARY,'l1','genes',sep='.'), col.names=c("cluster","symbol"), stringsAsFactors=FALSE)
+rownames(genesymbols) <- genesymbols$cluster
+
+genes <- rowsum(l1, genesymbols$symbol)
+
+libs$genes       <- colSums(genes > 0)
+libs$geneSymbols <- countSymbols(genes) # Not the same!
+```
+
+
+Raw reads per molecule (BED12 data)
+-----------------------------------
+
+```{r load_fragments}
+# bed <- loadBED12( libs[libs$counts > 0, "samplename"] %>%
+#              sub(RunA, "RunA", .) %>%
+#              sub(RunB, "RunB", .) %>%
+#              paste0(MOIRAI_FRAGS, "/", ., ".bed"))
+```
+
+Cell curation
+-------------
+
+```{r load_fluo_data}
+curation <- read.table( "../generated/samples.tsv"
+                      , head=TRUE, sep = "\t"
+                      , row.names = "Rownames")["Final"]
+
+libs$Group <- curation[rownames(libs), "Final"] %>% as.character
+```
+
+cDNA concentration.
+-------------------
+
+```{r cDNA_concentration, fig.height=2.5, message=FALSE, warning=FALSE}
+read.pg <- function(RUN)
+  paste0("../source/", RUN, ".picogreen.xlsx") %>%
+    fldgmPicoGreen("PN 100-6160") %>%
+    extract(,"concentration")
+libs$Concentration <- read.pg(RunA)
+fldgmConcentrationPlot(libs) + facet_wrap(~Group)
+```
+
+Controls
+--------
+
+Some samples with errors were repalced by the positive and negative controls.
+
+```{r flag-controls}
+libs[libs$Well == ctrls$RunA$posi & libs$Run == RunA, "Group"] <- "Positive control"
+libs[libs$Well == ctrls$RunA$nega & libs$Run == RunA, "Group"] <- "Negative control"
+```
+
+Combined analysis of fluorescence and cDNA concentration.
+---------------------------------------------------------
+
+Richness
+--------
+
+```{r calculate-richness}
+libs$l1 <- colSums(l1 > 0)
+libs$r100l1 <- rarefy(t(l1),100)
+```
+
+Analysis
+========
+
+Processing
+----------
+
+```{r qc-steps}
+plotAnnot(libs, 'steps', LIBRARY, libs$Group)
+```
+
+```{r qc-steps-all, fig.height=12}
+plotAnnot(libs, 'steps', LIBRARY, rownames(libs))
+```
+
+QC barplots
+-----------
+
+```{r qc-barplots}
+plotAnnot(libs, 'qc', LIBRARY, libs$Group)
+```
+
+```{r qc-barplots-all, fig.height=12}
+plotAnnot(libs, 'qc', LIBRARY, rownames(libs))
+```
+
+Annotation
+----------
+
+```{r annotation-barplots}
+plotAnnot(libs, 'counts', LIBRARY, libs$Group)
+```
+
+```{r annotation-barplots-all, fig.height=12}
+plotAnnot(libs, 'counts', LIBRARY, rownames(libs))
+```
+
+Correlation between runs
+------------------------
+
+```{r correlation-heatmap}
+NMF::aheatmap( cor(genes[-1, ])
+             , annCol=list(Group=libs$Group))
+
+NMF::aheatmap( cor(genes[-1, ] %>% TPM  %>% log1p)
+             , annCol=list(Group=libs$Group))
+```
+
+```{r correlation-heatmap-noerrors}
+singleCells <- libs$Group %in% c("Red", "Green", "G/R")
+NMF::aheatmap( cor(genes[-1, singleCells])
+            , annCol=list(Run=libs[singleCells, "Group"]))
+
+NMF::aheatmap( cor(genes[-1, singleCells] %>% TPM %>% log1p)
+            , annCol=list(Run=libs[singleCells, "Group"]))
+```
+
+Gene counts and TSS discovery
+-----------------------------
+
+### Gene count by error code.
+
+```{r gene-count, fig.height=2.5}
+dotsize <- 500
+ggplot(libs, aes(x=Group, y=genes)) +
+  stat_summary(fun.y=mean, fun.ymin=mean, fun.ymax=mean, geom="crossbar", color="gray") +
+  geom_dotplot(aes(fill=Group), binaxis='y', binwidth=1, dotsize=dotsize, stackdir='center') +
+  coord_flip()
+```
+
+Rarefaction (hanabi plot).
+--------------------------
+
+### TSS discovery
+
+```{r hanabi-TSS}
+hanabiPlot( hanabi(l1, from=0)
+          , ylab='number of TSS detected'
+          , xlab='number of unique molecule counts'
+          , main=paste("TSS discovery for", LIBRARY)
+          , GROUP=libs$Group %>% factor)
+```
+
+### Gene discovery
+
+```{r hanabi-gene}
+hanabiPlot( hanabi(genes, from=0)
+          , ylab='number of genes detected'
+          , xlab='number of unique molecule counts'
+          , main=paste("Gene discovery for", LIBRARY)
+          , GROUP=libs$Group %>% factor)
+```
+
+```{r libs}
+write.table( libs
+           , paste0(LIBRARY, ".libs.tsv")
+           , sep="\t", quote = FALSE
+           , row.names = FALSE)
+libs
+```
+
+```{r sessionInfo, cache = FALSE}
+sessionInfo()
+```

@@ -1,0 +1,170 @@
+---
+title: "Integration of the second batch of CAGE libraries."
+output: 
+  html_document: 
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+...
+
+# R commands to collect the numbers (you can skip reading it.)
+
+```{r echo=FALSE}
+#knitr::opts_chunk$set(cache  = TRUE)
+knitr::opts_knit$set(verbose = TRUE)
+# knitr::opts_chunk$set(dev=c('svg', 'png'))
+options(width = 100)
+ggplot2::theme_set(ggplot2::theme_bw())
+```
+
+```{r load_libraries}
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+```
+
+```{r load_sample_metadata}
+samples   <- read.delim("../generated/samples.tsv", head = TRUE, sep = "\t")
+libraries <- read.table('../source/libraries.tsv'
+                       , header = TRUE
+                       , stringsAsFactors = FALSE
+                       , colClasses = c(Moirai_Stamp="character"))
+```
+
+```{r useful_aliases}
+round2 <- libraries[grep("CAGE_[456]", libraries$Name), "C1_Run_ID"]
+```
+
+```{r integrate-per-lib-qc}
+# # This only works when the cached results are available.
+# 
+# cage4 <- new.env()
+# local(rmarkdown::render("RNhi10538.Rmd"), cage4)
+# 
+# cage5 <- new.env()
+# local(rmarkdown::render("RNhi10539.Rmd"), cage5)
+# 
+# cage6 <- new.env()
+# local(rmarkdown::render("RNhi10540.Rmd"), cage6)
+# 
+# libs <- rbind(cage4$libs, cage5$libs, cage6$libs)
+# libs$Rownames <- libs$samplename
+
+libs <- rbind(
+  read.table("RNhi10538.libs.tsv", sep="\t", head=TRUE),
+  read.table("RNhi10539.libs.tsv", sep="\t", head=TRUE),
+  read.table("RNhi10540.libs.tsv", sep="\t", head=TRUE)
+)
+
+libs$Rownames <- libs$samplename
+
+samples %<>% left_join(libs[,c("Rownames", "l1", "r100l1", "genes", "geneSymbols")])
+
+samples[samples$Run %in% round2, ] %>% summary
+samples[samples$Run %in% round2, c("Run","Timepoint")] %>% gdata::drop.levels() %>% table
+samples[samples$Run %in% round2, c("Final","Keep")] %>% gdata::drop.levels() %>% table
+
+samples[                         , "Group"] <- samples$Final %>% as.character
+samples[!is.na(samples$Timepoint), "Group"] <- samples[!is.na(samples$Timepoint), "Timepoint"] %>% as.character
+samples[!is.na(samples$Control),   "Group"] <- samples[!is.na(samples$Control), "Control"] %>% as.character
+samples$Group %<>% factor
+
+samples$Experiment <- sub("_...$", "", samples$Rownames)
+```
+
+# Quick summaries
+
+```{r round2_summary}
+myPlot <- function(X) {
+  set.seed(1)
+  X <- substitute(X)
+  ggplot( samples[samples$Run %in% round2,] %>%
+            gdata::drop.levels() %>%
+            sample_frac) +
+    coord_flip() +
+    geom_jitter( width = 0.3
+               , aes( color=Experiment
+                    , Group
+                    , eval(X))) +
+    ylab(deparse(X))
+}
+```
+
+## Indicators that scale with depth.
+
+Values for CAGE_5 should be lower, since it had only one HiSeq lane.
+
+### Number of genes detected.
+
+```{r summary-genes}
+myPlot(genes)
+```
+
+### Number of L1 TSS detected.
+
+```{r summary-l1}
+myPlot(l1)
+```
+
+### Number of molecules detected.
+
+```{r summary-counts}
+myPlot(counts)
+```
+
+## Indicators that should not vary with depth
+
+### Richness (scale of 100)
+
+```{r summary-richness}
+myPlot(r100l1)
+```
+
+### cDNA concentration
+
+CAGE_4 run looks cleaner.
+
+```{r summary-concentration}
+myPlot(Concentration)
+```
+
+### Spikes
+
+According to empty chambers, the amount of spikes varied between runs.
+(`CAGE_4` > `CAGE_5` > `CAGE_6`).
+
+```{r summary-spikes}
+myPlot(spikes / total)
+```
+
+### rRNA
+
+Empty chambers indicate background values (environmental
+contaminations ?).  Negative control shows that spike RNA
+does not result in significant amounts of artificial rRNA
+matches.
+
+More rRNA is observed in `CAGE_6` when there is a cell, but
+this can be just a consequence of having less spikes (see
+above).
+
+```{r summary-rRNA}
+myPlot(rdna / total)
+```
+
+### rRNA / spikes ratio
+
+Higher in case of the presence of a cell.
+
+```{r summary-rnda-spikes}
+myPlot(rdna / spikes)
+```
+
+### Tag dust
+
+The `CAGE_5` run is much nosier.
+
+```{r summary-tagdust}
+myPlot(tagdust / total)
+```
+
