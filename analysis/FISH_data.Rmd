@@ -1,0 +1,341 @@
+---
+title: "FISH data"
+author: "Jonathan Moody"
+output:
+  html_document:
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+---
+
+# setup
+```{r setup, message=FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+library(scales)
+library(knitr)
+ggplot2::theme_set(ggplot2::theme_bw())
+options(width = 120)
+```
+
+# Enhancer expression
+```{r, fig.height=2.5, fig.width=4}
+df <- fread('../generated/fish_enh_gene.csv')
+setnames(df, gsub(' ','_',colnames(df)))
+df$chr = 'chr10 eRNA'
+df[Coding_gene == 'PMEPA1']$chr <- 'chr20 eRNA'
+df[Coding_gene == 'PDK2']$chr <- 'chr17 eRNA'
+
+df2 <- df[, .(enhancer=sum(Enhancer_spot_number>0), gene=sum(Coding_gene_spot > 0), overlap=sum(Overlapped_enhancer_number >0)), by=.(t=as.factor(Timepoint), gene_id=Coding_gene, chr=as.factor(chr))]
+df3 <- melt.data.table(df2, id.vars = c('t', 'gene_id', 'chr'))
+
+(ggplot(df3[variable=='enhancer'], aes(t, value, color=chr, group=chr))
+  +geom_line(stat = 'identity')
+  +xlab('Timepoint')
+  +ylab('% cells with eRNA FISH spot')
+  +scale_color_discrete(guide = guide_legend(title = NULL))
+  )
+
+# for spot count 
+#df4.a <- df[, .(spots=as.integer(as.data.frame(table(Coding_gene_spot))[,1]), n=as.integer(as.data.frame(table(Coding_gene_spot))[,2])/.N, type='gene'), by=.(Timepoint, chr)]
+#df4.b <- df[, .(spots=as.integer(as.data.frame(table(Enhancer_spot_number))[,1]), n=as.integer(as.data.frame(table(Enhancer_spot_number))[,2])/.N, type='enh'), by=.(Timepoint, chr)]
+#df4 <- rbindlist(l = list(df4.a, df4.b))
+
+df4.a <- df[Coding_gene_spot > 0, .(n=mean(Coding_gene_spot), type='gene'), by=.(Timepoint, chr)]
+df4.b <- df[Enhancer_spot_number > 0, .(n=mean(Enhancer_spot_number), type='enhancer'), by=.(Timepoint, chr)]
+df4 <- rbindlist(l = list(df4.a, df4.b))
+```
+
+```{r, fig.width=3, fig.height=3}
+(ggplot(df3[variable %in% c('enhancer','gene'), .(chr=gsub(' eRNA','',chr), t, value, variable)], aes(t, value))
+  +geom_bar(stat = 'identity')
+  +xlab('Timepoint')
+  +ylab('% cells with FISH spot')
+  +facet_grid(variable~chr)
+  )
+ggsave('../manuscript/Fig5/all_erna.pdf', width = 6, height = 4, units='in')
+
+
+(ggplot(df3[variable %in% c('enhancer') & chr=='chr20 eRNA'], aes(t, value))
+  +geom_bar(stat = 'identity')
+  +xlab('Timepoint (hours)')
+  +ylab('% cells with FISH spot')
+  +facet_grid(.~chr)
+  )
+ggsave('../manuscript/Fig5/chr20_erna.pdf', width = 3, height = 3, units='in')
+
+
+(ggplot(df4, aes(as.factor(Timepoint), n))
+  +geom_bar(stat = 'identity')
+  +xlab('Timepoint')
+  +ylab('Mean FISH spots per cell')
+  +facet_grid(type~chr)
+  )
+ggsave('../manuscript/Fig5/all_erna_spotcount_2.pdf', width = 6, height = 4, units='in')
+```
+
+
+
+```{r, fig.height=3, fig.width=6}
+(ggplot(df3, aes(t, value, color=variable, group=variable))
+  +geom_line(stat = 'identity')
+  +xlab('Timepoint')
+  +ylab('% cells with eRNA FISH spot')
+  +facet_wrap(~chr)
+  +scale_color_discrete(guide = guide_legend(title = NULL))
+  )
+ggsave('../manuscript/Fig5/all_overlap_line.pdf', width = 5, height = 3, units='in')
+
+
+(ggplot(df3[chr %in% c('chr10 eRNA','chr20 eRNA')], aes(t, value, color=variable, group=variable))
+  +geom_line(stat = 'identity')
+  +xlab('Timepoint')
+  +ylab('% cells with eRNA FISH spot')
+  +facet_wrap(~chr)
+  +scale_color_discrete(guide = guide_legend(title = NULL))
+  )
+ggsave('../manuscript/Fig5/chr10_20_overlap_line.pdf', width = 5, height = 3, units='in')
+```
+
+
+```{r, fig.width=5, fig.height=2.5}
+df2[, pc_gene := overlap/gene]
+df2[, pc_enh := overlap/enhancer]
+df3 <- melt.data.table(df2, id.vars = c('t', 'gene_id', 'chr'))
+(ggplot(df3[variable%in%c('pc_gene', 'pc_enh') & gene_id %in% c('KLF6', 'PMEPA1'), .(chr=gsub(' eRNA','',chr), t, value, variable)], 
+        aes(t, value, color=variable, group=variable))
+  +geom_line()
+  +facet_wrap(~chr)
+  +xlab('Timepoint')
+  +ylab('% spot overlap')
+)
+
+(ggplot(df3[variable%in%c('pc_enh') & gene_id %in% c('KLF6', 'PMEPA1'), .(chr=gsub(' eRNA','',chr), t, value, variable)], 
+        aes(t, value*100))
+  +geom_bar(stat = 'identity')
+  +facet_wrap(~chr)
+  +xlab('Timepoint')
+  +ylab('% eRNA overlaping nearby gene')
+)
+ggsave('../manuscript/Fig5/all_overlap.pdf', width = 5, height = 3, units='in')
+
+
+(ggplot(df3[variable%in%c('pc_enh') & gene_id %in% c( 'PMEPA1')], 
+        aes(t, value*100))
+  +geom_bar(stat = 'identity')
+  +facet_wrap(~chr)
+  +xlab('Timepoint (hours)')
+  +ylab('% spots overlapping PMEPA1')
+)
+ggsave('../manuscript/Fig5/chr20_overlap.pdf', width = 3, height = 3, units='in')
+```
+
+```{r, fig.height=3, fig.width=6}
+df <- fread('../generated/fish_enh_overlap.csv')
+setnames(df, gsub(' ','_',colnames(df)))
+df$Chromosome_number <- paste0('chr',df$Chromosome_number,' eRNA')
+df2 <- df[, .(
+  sense_n=sum(Sense_enhancer_spot_number >0), 
+  sense_t=sum(Sense_enhancer_spot_number), 
+  anti_n=sum(`Anti-sense_enhancer_spot_number` >0), 
+  anti_t=sum(`Anti-sense_enhancer_spot_number`), 
+  over_n=sum(Overlapped_enhancer_number>0), 
+  over_t=sum(Overlapped_enhancer_number)
+  ), by=.(t=as.factor(Timepoint), chr=as.factor(Chromosome_number))]
+
+df2[, `+ve strand` := sense_t/(sense_t+anti_t)]
+df2[, `-ve strand` := anti_t/(sense_t+anti_t)]
+df3 <- melt.data.table(df2, id.vars = c('t', 'chr'))
+
+(ggplot(df3[variable %in% c('+ve strand', '-ve strand')], aes(t, value*100, fill=variable)) 
+  + geom_bar(stat = 'identity') 
+  + facet_wrap(~chr)
+  + xlab('Timepoint (hour)')
+  + ylab('% eRNA spot')
+)
+ggsave('../manuscript/Fig5/all_direction.pdf', width = 6, height = 3, units='in')
+
+(ggplot(df3[variable %in% c('+ve strand', '-ve strand') & chr=='chr20 eRNA'], aes(t, value*100, fill=variable)) 
+  + geom_bar(stat = 'identity') 
+  + facet_wrap(~chr)
+  + xlab('Timepoint (hour)')
+  + ylab('% eRNA spots')
+  +scale_fill_discrete(guide = guide_legend(title = NULL))
+)
+ggsave('../manuscript/Fig5/chr20_direction.pdf', width = 4, height = 3, units='in')
+```
+
+# C1 CAGE comparison
+
+Load data
+```{r load_gene, fig.height=5, fig.width=5, message=FALSE}
+library(data.table)
+library(ggplot2)
+library(VennDiagram)
+library(scales)
+library(knitr)
+ggplot2::theme_set(ggplot2::theme_bw())
+#opts_chunk$set(cache=TRUE)
+options(width = 120)
+opts_chunk$set(tidy.opts=list(width.cutoff=80),tidy=TRUE)
+exp <- readRDS('~/Documents/C1_timecourse/GENCODEv25.cage_cluster.coord.mask.q0.gene_sum.Rds')
+samples <- fread('/Users/jonathan/Documents/C1_timecourse/samples.tsv', header = T)
+sc_keep <- samples[Keep == T, Rownames]
+toDrop <- c("CAGE_5_B01", "CAGE_5_C02", "CAGE_5_F09", "CAGE_5_D06", "CAGE_5_D10", "CAGE_5_D11", "CAGE_5_D12", "CAGE_5_E06", "CAGE_5_E05", "CAGE_5_E12", "CAGE_5_E11", "CAGE_5_F11", "CAGE_5_G12", "CAGE_6_B09")
+exp <- exp[,union( grep("BULK|gene", colnames(exp)), which(colnames(exp) %in% sc_keep)), with=F]
+exp <- exp[,!colnames(exp) %in% toDrop ,with=F]
+rm(sc_keep)
+rm(toDrop)
+
+geneClass <- exp$geneClass
+exp$geneClass <- NULL
+geneID <- exp$geneID
+exp$geneID <- NULL
+
+counts <- as.matrix(exp)
+rownames(counts) <- geneID
+rm(exp)
+rm(geneID)
+
+bulk_idx <- grep('BULK', colnames(counts))
+sc_idx <- grep('CAGE_[4-6]', colnames(counts)) # only use 4-6
+sc_idx_456 <- grep('CAGE_[4-6]', colnames(counts))
+e_idx <- geneClass == 'enhancer_locus'
+pc_idx <- geneClass == 'protein_coding'
+lc_idx <- geneClass == 'lincRNA'
+#rm(geneClass)
+
+sc_t00 <- colnames(counts) %in% samples[Timepoint=='t00', Rownames]
+sc_t06 <- colnames(counts) %in% samples[Timepoint=='t06', Rownames]
+sc_t24 <- colnames(counts) %in% samples[Timepoint=='t24', Rownames]
+#rm(samples)
+
+calc_cpm <- function (expr_mat)
+{
+  norm_factor <- colSums(expr_mat)
+  return(t(t(expr_mat)/norm_factor) * 10^6)
+}
+counts[,bulk_idx] <- calc_cpm(counts[,bulk_idx])
+#counts <- calc_cpm(counts)
+
+```
+
+Plots
+```{r fish_figs, fig.width=6, fig.height=3}
+fish_genes <- c('ENSG00000067082.14_1','ENSG00000124225.15_2', 'ENSG00000005882.11_2', 'ADDG10003929991.E', 'ADDG17048105016.E', 'ADDG20056293544.E')
+enh_m <- melt(counts[fish_genes, sc_idx_456])
+enh_m <- as.data.table(enh_m)
+setnames(enh_m, c('gene', 'cell', 'reads'))
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+enh_m$chr = 'chr10'
+enh_m[gene %in% c('ENSG00000005882.11_2', 'ADDG17048105016.E')]$chr <- 'chr17'
+enh_m[gene %in% c('ENSG00000124225.15_2', 'ADDG20056293544.E')]$chr <- 'chr20'
+enh_m$type <- 'enhancer'
+enh_m[grep('ENSG', gene)]$type <- 'gene'
+
+enh_m[, .(n=.SD[reads>0, .N] / .N, cells=.SD[reads>0, .N] , tot=.N), by=.(gene, t, chr, type)][order(gene, t)]
+
+enh_m[, .(dcast.data.table(.SD, cell~type, value.var = 'reads')[, sum(enhancer>0&gene>0)/sum(enhancer>0) ]), by=.(chr, t)]
+(ggplot(enh_m[chr=='chr20', .(dcast.data.table(.SD, cell~type, value.var = 'reads')[, sum(enhancer>0&gene>0)/sum(enhancer>0) ]), by=.(chr=paste0(chr,' eRNA'), t=gsub('t','',t))], 
+        aes(t, V1*100))
+  +geom_bar(stat = 'identity')
+  +facet_wrap(~chr)
+  +xlab('Timepoint (hours)')
+  +ylab('% eRNA expressing cells \nalso expressing PMEPA1')
+  )
+ggsave('../manuscript/Fig5/chr20_overlap_cage.pdf', width = 3, height = 3, units='in')
+
+
+(ggplot(enh_m[, .(n=.SD[reads>0, .N] / .N), by=.(gene, t=gsub('t','',t), chr, type)], aes(t, n*100))
+  +geom_bar(stat = 'identity')
+  +facet_grid(type~chr, scales='free_y')
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint')
+)
+ggsave('../manuscript/Fig5/all_erna_cage.pdf', width = 6, height = 4, units='in')
+
+(ggplot(enh_m[chr=='chr20' & type=='enhancer', .(n=.SD[reads>0, .N] / .N), by=.(gene, t=gsub('t','',t), chr=paste0(chr,' eRNA'), type)], aes(t, n*100))
+  +geom_bar(stat = 'identity')
+  +facet_grid(.~chr, scales='free_y')
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint')
+)
+ggsave('../manuscript/Fig5/chr20_erna_cage.pdf', width = 3, height = 3, units='in')
+
+
+fish_enh <- c('ADDG10003929991.E', 'ADDG17048105016.E', 'ADDG20056293544.E')
+enh_m <- melt(counts[fish_enh, sc_idx_456])
+enh_m <- as.data.table(enh_m)
+setnames(enh_m, c('gene', 'cell', 'reads'))
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+enh_m[, .(n=.SD[reads>0, .N] / .N, cells=.SD[reads>0, .N] , tot=.N), by=.(gene, t)][order(gene, t)]
+(ggplot(enh_m[, .(n=.SD[reads>0, .N] / .N), by=.(gene, t)], aes(t, n*100))
+  +geom_bar(stat = 'identity')
+  +facet_wrap(~gene)
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint')
+)
+#ggsave(filename = '~/Downloads/enh.png', width = 6, height = 3, units = 'in')
+
+fish_genes <- c('ENSG00000067082.14_1','ENSG00000124225.15_2', 'ENSG00000005882.11_2')
+enh_m <- melt(counts[fish_genes, sc_idx_456])
+enh_m <- as.data.table(enh_m)
+setnames(enh_m, c('gene', 'cell', 'reads'))
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+enh_m[, .(n=.SD[reads>0, .N] / .N, cells=.SD[reads>0, .N] , tot=.N), by=.(gene, t)][order(gene, t)]
+enh_m[gene == 'ENSG00000067082.14_1', gene := 'KLF6']
+enh_m[gene == 'ENSG00000124225.15_2', gene := 'PMEPA1']
+(ggplot(enh_m[, .(n=.SD[reads>0, .N] / .N), by=.(gene, t)], aes(t, n*100))
+  +geom_bar(stat = 'identity')
+  +facet_wrap(~gene)
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint (hours)')
+)
+#ggsave(filename = '~/Downloads/gene.png', width = 4, height = 3, units = 'in')
+
+enh_m[reads > 0, reads := 1]
+enh_m <- dcast(enh_m, cell~gene, value.var = 'reads')
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+
+fish_genes <- c('ENSG00000067082.14_1','ADDG10003929991.E')
+enh_m <- melt(counts[fish_genes, sc_idx_456])
+enh_m <- as.data.table(enh_m)
+setnames(enh_m, c('gene', 'cell', 'reads'))
+enh_m[reads > 0, reads := 1]
+enh_m <- dcast(enh_m, cell~gene)
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+enh_m[, table(ENSG00000067082.14_1, ADDG10003929991.E)]
+enh_m[, table(ENSG00000067082.14_1, ADDG10003929991.E, t)]
+enh_m$both <- as.numeric(enh_m$ENSG00000067082.14_1 & enh_m$ADDG10003929991.E)
+enh_m <- enh_m[, .(gene=sum(ENSG00000067082.14_1)/.N, enh=sum(ADDG10003929991.E)/.N, both=sum(both)/.N), by=.(t)]
+enh_m <- melt(enh_m, id.vars = 't' )
+(ggplot(enh_m, aes(t, value*100, color=variable))
+  +geom_point()
+  +geom_line(aes(group=variable))
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint')
+  +ggtitle('KLF6 + eRNA')
+)
+#ggsave(filename = '~/Downloads/overlap_1.png', width = 4, height = 3, units = 'in')
+
+fish_genes <- c('ENSG00000124225.15_2','ADDG20056293544.E')
+enh_m <- melt(counts[fish_genes, sc_idx_456])
+enh_m <- as.data.table(enh_m)
+setnames(enh_m, c('gene', 'cell', 'reads'))
+enh_m[reads > 0, reads := 1]
+enh_m <- dcast(enh_m, cell~gene)
+enh_m <- merge(enh_m, samples[, .(cell=Rownames, t=Timepoint)])
+enh_m[, table(ENSG00000124225.15_2, ADDG20056293544.E)]
+enh_m[, table(ENSG00000124225.15_2, ADDG20056293544.E, t)]
+enh_m$both <- as.numeric(enh_m$ENSG00000124225.15_2 & enh_m$ADDG20056293544.E)
+enh_m <- enh_m[, .(gene=sum(ENSG00000124225.15_2)/.N, enh=sum(ADDG20056293544.E)/.N, both=sum(both)/.N), by=.(t)]
+enh_m <- melt(enh_m, id.vars = 't' )
+(ggplot(enh_m, aes(t, value*100, color=variable))
+  +geom_point()
+  +geom_line(aes(group=variable))
+  +ylab('% cells with CAGE signal')
+  +xlab('Timepoint')
+  +ggtitle('PMEPA1 + eRNA')
+)
+#ggsave(filename = '~/Downloads/overlap_2.png', width = 4, height = 3, units = 'in')
+```

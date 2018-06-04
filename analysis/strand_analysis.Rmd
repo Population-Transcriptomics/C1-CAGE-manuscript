@@ -1,0 +1,270 @@
+---
+title: "CAGE strand analysis"
+author: "Jonathan Moody"
+output: 
+  html_document: 
+    number_sections: yes
+    keep_md: yes
+    toc: yes
+---
+
+Do we detect bidirectional transcription at enhancer loci in the bulk CAGE data, and in the C1 cage data?
+
+# Data gathering
+Rerun data gathering to also save antisense reads at promoter loci
+Run on osc-ac2 in /home/jonathan/data/C1_cage/
+```{r, eval=FALSE}
+for file in data/ctss/*.bed
+do
+bedtools intersect -a annotation/F5_CAGE_anno.GENCODEv25.cage_cluster.coord.mask_ERCC.bed -b $file -wa -wb |  \
+  awk '{print $4,$7,$8,$9,$10,$11,$12}' OFS="\t" >>                                                           \
+  /home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.ctss.intersect.anystrand.tab
+done
+
+library(data.table)
+ctss <- fread('/home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.ctss.intersect.anystrand.tab', sep="\t")
+setnames(ctss, c('dpi', 'chr', 'st','end','library','reads','strand'))
+
+# Cast summing reads for each annotation window
+x <- dcast.data.table(ctss, dpi+library~strand, value.var = 'reads', fun.aggregate = sum)
+setnames(x, c('+','-'), c('p','m'))
+
+write.table(x, '/home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.strand_stat_all.tab', sep='\t', row.names = F, col.names = T, quote = F)
+saveRDS(x, '/home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.strand_stat_all.Rds')
+
+z <- x[, .(p_bulk=.SD[grep('^BULK', library), sum(p)],
+                            m_bulk=.SD[grep('^BULK', library), sum(m)],
+                            p_sc=.SD[grep('^CAGE', library), sum(p)],
+                            m_sc=.SD[grep('^CAGE', library), sum(m)]), by=.(dpi)]
+
+
+z$bulk_stat <- (z$p_bulk-z$m_bulk)/(z$p_bulk+z$m_bulk)
+z$sc_stat <- (z$p_sc-z$m_sc)/(z$p_sc+z$m_sc)
+
+write.table(z, '/home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.strand_stat.tab', sep='\t', row.names = F, col.names = T, quote = F)
+saveRDS(z, '/home/jonathan/data/C1_cage/results/GENCODEv25.cage_cluster.coord.mask.strand_stat.Rds')
+```
+
+# Data loading
+```{r data_load}
+library(data.table)
+library(ggplot2)
+library(scales)
+library(knitr)
+#opts_chunk$set(fig.path = "./strand_analysis_files/")
+ctss <- readRDS('~/Documents/C1_timecourse/GENCODEv25.cage_cluster.coord.mask.strand_stat.Rds')
+#saveRDS(ctss, '~/Documents/repos/C1_CAGE_Timecourse/generated/ctss_directionality_pooled.Rds')
+meta <- fread('zcat < ~/Documents/repos/C1_CAGE_Timecourse/gene_models/GENCODEv25/log/F5_CAGE_anno.GENCODEv25.cage_cluster.info.tsv.gz')
+ctss_uncol <- readRDS('~/Documents/C1_timecourse/GENCODEv25.cage_cluster.coord.mask.strand_stat_all.Rds')
+#saveRDS(ctss_uncol, '~/Documents/repos/C1_CAGE_Timecourse/generated/ctss_directionality_all.Rds')
+setnames(meta, 'clusterID', 'dpi')
+
+ctss <- merge(ctss, meta, by='dpi')
+ctss$trnscptIDStr <- NULL
+
+enh_intergenic <- fread('~/Documents/C1_timecourse/F5_enh_nongc_10kb.bed', sep='\t')[,4,with=F]
+setnames(enh_intergenic, 'geneIDStr')
+
+# https://stackoverflow.com/a/14674703
+symlog_trans <- function(base = 10, thr = 1, scale = 1){
+  trans <- function(x)
+    ifelse(abs(x) < thr, x, sign(x) * 
+             (thr + scale * suppressWarnings(log(sign(x) * x / thr, base))))
+
+  inv <- function(x)
+    ifelse(abs(x) < thr, x, sign(x) * 
+             base^((sign(x) * x - thr) / scale) * thr)
+
+  breaks <- function(x){
+    sgn <- sign(x[which.max(abs(x))])
+    if(all(abs(x) < thr))
+      pretty_breaks()(x)
+    else if(prod(x) >= 0){
+      if(min(abs(x)) < thr)
+        sgn * unique(c(pretty_breaks()(c(min(abs(x)), thr)),
+                       log_breaks(base)(c(max(abs(x)), thr))))
+      else
+        sgn * log_breaks(base)(sgn * x)
+    } else {
+      if(min(abs(x)) < thr)
+        unique(c(sgn * log_breaks()(c(max(abs(x)), thr)),
+                 pretty_breaks()(c(sgn * thr, x[which.min(abs(x))]))))
+      else
+        unique(c(-log_breaks(base)(c(thr, -x[1])),
+                 pretty_breaks()(c(-thr, thr)),
+                 log_breaks(base)(c(thr, x[2]))))
+    }
+  }
+  trans_new(paste("symlog", thr, base, scale, sep = "-"), trans, inv, breaks)
+}
+```
+
+# Analysis
+## Bidirectionality in protein coding dpi comapred with enhancer loci
+Bidirectionality statistic:
+$$\frac{Plus~strand~reads - minus~strand~reads}{sum(reads)}$$
+```{r enh_pc, fig.height=4, fig.width=8}
+nrow(meta[type=='enhancer'])
+nrow(ctss[type=='enhancer' & p_bulk + m_bulk > 0])
+nrow(ctss[type=='enhancer' & p_bulk + m_bulk >= 10])
+
+
+(ggplot(ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus') & p_bulk + m_bulk >= 10])
+ +geom_histogram(aes(bulk_stat))#p_bulk - m_bulk))
+ +facet_wrap(~geneClassStr, scales = 'free')
+ +xlab('Bulk directionality statistic')
+ )
+
+(ggplot(ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus')& p_bulk + m_bulk >= 10])
+ +geom_histogram(aes(sc_stat))#p_bulk - m_bulk))
+ +facet_wrap(~geneClassStr, scales = 'free')
+ +xlab('Single cell pooled directionality statistic')
+ )
+
+# Agreement of directionality between pooled single cell and bulk data
+(ggplot(ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus')& p_bulk + m_bulk >= 10])
+  +geom_point(aes(p_bulk - m_bulk, p_sc - m_sc), alpha=0.2)
+  +facet_wrap(~geneClassStr, scales = 'free')
+  +xlab('BULK: positive strand reads - negative strand reads')
+  +ylab('Single Cell Pooled: positive strand reads - negative strand reads')
+  +scale_x_continuous(trans = 'symlog')
+  +scale_y_continuous(trans = 'symlog')
+)
+ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus') & abs(bulk_stat) > 0.5 & abs(sc_stat)>0.5][, table(bulk_plus=bulk_stat >0, sc_plus=sc_stat >0, geneClassStr)]
+```
+
+## Bidirectional loci in bulk data
+```{r bulk_pooled}
+(ggplot(ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus') &  p_bulk + m_bulk > 10])
+  +geom_point(aes(p_bulk, m_bulk, colour=abs(bulk_stat)>0.5))
+  +facet_wrap(~geneClassStr)
+      +scale_x_continuous(trans = 'log10',
+                        breaks = trans_breaks('log10', function(x) 10^x),
+                        labels = trans_format('log10', math_format(10^.x)))
+    +scale_y_continuous(trans = 'log10',
+                        breaks = trans_breaks('log10', function(x) 10^x),
+                        labels = trans_format('log10', math_format(10^.x)))
+ +xlab('Plus strand reads')
+ +ylab('Minus strand reads')
+)
+
+ctss[geneClassStr %in% c('protein_coding', 'enhancer_locus') &  p_bulk + m_bulk > 10][, table(bidirectional=abs(bulk_stat) <= 0.5, geneClassStr)]
+
+enh_bi <- ctss[geneClassStr == 'enhancer_locus' &  p_bulk + m_bulk > 10 & abs(bulk_stat) <= 0.5, dpi]
+```
+
+## Intergenic bidirectional enhancer loci
+```{r intergenic_enhancers}
+# for FISH testing
+enh_int <- ctss[dpi %in% enh_bi & geneIDStr %in% enh_intergenic$geneIDStr][,1:7, with=F][order(-(p_bulk+m_bulk))]
+#write.table(enh_int, '~/Documents/repos/C1_CAGE_Timecourse/generated/Enhancers_bidirectional_intergenic.tab', col.names=T, row.names = F, quote=F, sep='\t')
+```
+
+## Bidirectional loci in C1 CAGE libraries
+Are these BULK budirectional loci also detected as bidirectional in single cells?
+```{r single_cells}
+(ggplot(ctss_uncol[dpi %in% enh_bi & 1:nrow(ctss_uncol) %in% grep('^CAGE', library)])
+  +geom_point(aes(p, m, colour=abs(stat) > 0.5))
+        +scale_x_continuous(trans = 'log10',
+                        breaks = trans_breaks('log10', function(x) 10^x),
+                        labels = trans_format('log10', math_format(10^.x)))
+    +scale_y_continuous(trans = 'log10',
+                        breaks = trans_breaks('log10', function(x) 10^x),
+                        labels = trans_format('log10', math_format(10^.x)))
+ +xlab('Plus strand reads')
+ +ylab('Minus strand reads')
+    )
+ctss_uncol[dpi %in% enh_bi & 1:nrow(ctss_uncol) %in% grep('^CAGE', library) & p+m > 9, length(unique(dpi))]
+
+ctss_uncol[dpi %in% enh_bi & 1:nrow(ctss_uncol) %in% grep('^CAGE', library), table(bidirectional=abs(stat) <= 0.5, '10 reads'=p+m>=10)]
+
+# n = number of bidirectional single cells with >= 10 reads
+ctss_uncol[dpi %in% enh_bi & 1:nrow(ctss_uncol) %in% grep('^CAGE', library),.(n=nrow(.SD[p+m>=10 & abs(stat) <= 0.5])),by=.(dpi)][n>0][order(-n)]
+
+# single cells with reads at chr13:67674730-67675228, 15% with 10 or more reads are bidirectional
+ctss_uncol[dpi=="chr13:67674730-67675228" & 1:nrow(ctss_uncol) %in% grep('^CAGE', library)][, table('10 reads'=p+m >= 10, bidirecitonal=abs(stat) <= 0.5)]
+```
+
+```{r}
+filt_exp <- read.table('~/Documents/C1_timecourse/norm_batch_corr_exp.tsv')
+filt_exp <- rownames(filt_exp)
+ctss_uncol <- ctss_uncol[dpi %in% filt_exp[grep('chr', filt_exp)] & 1:nrow(ctss_uncol) %in% grep('^CAGE_[456]', library) & dpi %in% ctss[type=='enhancer', dpi]]
+enh_bi <- ctss[geneClassStr == 'enhancer_locus' & abs(sc_stat) <= 0.5, dpi]
+#enh_bi <- ctss[type=='enhancer' & dpi %in% filt_exp & abs(bulk_stat) < 0.9 & abs(sc_stat) < 0.9 & sign(sc_stat) == sign(bulk_stat), dpi]
+sum(enh_bi %in% filt_exp)
+se <- function(x) sqrt(var(x)/length(x))
+sel_loci_cells <- ctss_uncol[dpi%in%enh_bi][p+m > 10, .(mean=mean(abs(stat)), se=se(abs(stat)), cells=.N) ,by=.(dpi)][cells >= 5]
+sel_loci_cells
+
+df <- merge(sel_loci_cells, ctss[, .(dpi, sc_stat=abs(sc_stat), bulk_stat=abs(bulk_stat))], by='dpi')
+#dpi_order <- df[order(mean-sc_stat), dpi]
+dpi_order <- df[order(-sc_stat), dpi]
+df$dpi <- factor(df$dpi, levels = dpi_order)
+setnames(df, c('mean','sc_stat'), c('single cell mean','pooled'))
+#df2 <- melt.data.table(df,id.vars = 'dpi')
+#(ggplot(df2[!variable%in%c('cells', 'se')], aes(value, dpi, color=variable))
+#  +geom_point()
+  #+geom_point(aes(sc_stat, dpi))
+  #+geom_point(aes(mean, dpi, color='red'))
+#  +xlab('Bidirectionality statistic')
+#  +ylab(NULL)
+#  +guides(colour=guide_legend(title = NULL))
+#  +theme_bw()
+#  +geom_errorbarh(data = df, mapping = aes(xmax = `single cell mean` + se, xmin = `single cell mean` - se, height = .2))
+#    )
+
+(ggplot(df)
+  +geom_point(aes(`single cell mean`, dpi, colour='single cell mean'))
+  +geom_point(aes(pooled, dpi, colour='pooled'))
+  #+geom_point(aes(bulk_stat, dpi, colour='bulk'))
+  #+geom_point(aes(sc_stat, dpi))
+  #+geom_point(aes(mean, dpi, color='red'))
+  +xlab('Bidirectionality statistic')
+  +ylab(NULL)
+  +guides(colour=guide_legend(title = NULL))
+  +theme_bw()
+  +geom_errorbarh(data = df, mapping = aes(y=dpi, xmax = `single cell mean` + se, xmin = `single cell mean` - se, height = .2))
+  +scale_color_brewer(palette="Set1")
+    )
+ggsave('sc_direction.pdf', path='../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
+#ggsave('tmp2.pdf', path='~/Downloads/', width = 6, height = 4.5, units = 'in')
+
+# 826 - Andrew's filtering
+# 87 - pooled bidirectional 0-0.5
+# 2 cells - 78
+# 3 cells - 58
+# 5 cells - 32
+# 10 cells - 8
+# 20 cells - 4
+
+df2 <- ctss_uncol[dpi %in% dpi_order & p+m>10]
+df2$dpi <- factor(df2$dpi, levels = dpi_order)
+
+(ggplot(df2, aes(abs(stat), dpi))
+  +geom_bin2d(bins=20)
+  +geom_point(data=df, mapping=aes(pooled, dpi, color='pooled'))
+  +xlab('Bidirectionality statistic')
+  +ylab(NULL)
+  #+guides(colour=guide_legend(title = 'cells'))
+  +theme_bw()
+  )
+ggsave('sc_direction_heatmap.pdf', path='../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
+
+
+# balanced
+ctss_uncol[p>10 & m>10, .(p=sum(p), m=sum(m), s=median(stat)), by=.(dpi)][abs(s) < 0.3 ]
+# neg
+ctss_uncol[p>10 & m>10, .(p=sum(p), m=sum(m), s=median(stat)), by=.(dpi)][s < -0.3 ]
+# pos
+ctss_uncol[p>10 & m>10, .(p=sum(p), m=sum(m), s=median(stat)), by=.(dpi)][s > 0.3 ]
+```
+
+### chr13:67674730-67675228
+This loci is bidirectional in 14 C1 libraries.
+![chr13:67674730-67675228](../generated/zenbu_chr13:67674730-67675228.png)
+![chr13:67674730-67675228](../generated/zenbu_chr13:67674730-67675228_exp.png)
+![chr13:67674730-67675228](../generated/zenbu_chr13:67674730-67675228_exp2.png)
+
+### chr19:14732511-14733275
+The second most widely detected as bidirectional locus in 4 cells, but overlaps a pseudogene...
+![chr19:14732511-14733275](../generated/zenbu_chr19:14732511-14733275.png)
