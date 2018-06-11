@@ -1,0 +1,45 @@
+=================
+File descriptions
+=================
+CAGE cluster centric annotation, one-row-per CAGE cluster, with infomation of its associated genes
+
+
+===================
+Column descriptions
+===================
+
+column        description
+------        -----------
+clusterID     [unique ID] Identifier of the CAGE cluster. Could be either promoter or enhancers.
+clusterName   [string] Name of the cluster, in format of [p|e][rank]@[geneNameX],[p|e][rank]@[geneNameY]
+type          [enhancer or promoter] the CAGE cluster is defined as promoter or enhancer according to FANTOM5 annotation
+mask          [yes or no] the CAGE cluster is masked, or not
+F5_tag_count  [integer] number of CAGE tag found in FANTOM5
+geneNum       [string] number of gene associated with the CAGE cluster
+trnscptIDStr  [string] ID of transcripts associated with the CAGE cluster, ";" delimited.
+geneIDStr     [string] Identifier of gene associated with the CAGE cluster, ";" delimited. Mainly inherited from the "gene ID" field in GENCODE or FANTOM CAT, plus "addon" genes from groups of unannotated CAGE clusters [ADDG#########].
+geneNameStr   [string] Name of gene associated with the CAGE cluster, ";" delimited. Mainly inherited from the "gene name" field in GENCODE, , plus "addon" genes from unannotated CAGE clusters [ADDG#########].
+geneClassStr  [string] Class of gene associated with the CAGE cluster, ";" delimited. if anno was from genecode, it refers to the biotype of the genes from genecode. if anno was from FANTOM CAT, it refers to the gene classes of the genes in FANTOM CAT.
+F5_anno       [string] original annotation in FANTOM5
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+F5_CAGE_anno.GENCODEv25.cage_cluster.info.tsv.gz was created from running,
+
+2017-06-12 17:30
+/Users/chung/Applications/research/perlScripts/FANTOM/gene_model/F5_CAGE_Annotator/v0.1/F5_CAGE_Annotator_v0.1.pl
+--F5_promoter_DPI_bed_path=/Volumes/LaCie2TB_D/other_project/single_cell/DPI_bed/hg19.cage_peak_phase1and2combined_coord.bed
+--F5_enhancer_DPI_bed_path=/Volumes/LaCie2TB_D/other_project/single_cell/DPI_bed/human_permissive_enhancers_phase_1_and_2.bed
+--F5_anno_bed_path=/Volumes/LaCie2TB_D/FANTOM/FANTOM5_CAT/resources/FANTOM5_DPI/annotations/enhancer_plus_promoter/hg19.enhancer_promoter_combined.bed
+--transcript_info_path=/Users/chung/Documents/Data/resources/genome/human/inUse/hg19/gencode/gencodeGtfParser/v25lift37/GENCODEv25/log/GENCODEv25.transcript_based.info.clean.tsv
+--transcript_bed_path=/Users/chung/Documents/Data/resources/genome/human/inUse/hg19/gencode/gencodeGtfParser/v25lift37/GENCODEv25/bed/all/GENCODEv25.trnscpt_all.clean.bed
+--gene_info_path=/Users/chung/Documents/Data/resources/genome/human/inUse/hg19/gencode/gencodeGtfParser/v25lift37/GENCODEv25/log/GENCODEv25.gene_based.info.clean.tsv
+--chrom_size_path=/Users/chung/Documents/Data/resources/genome/human/inUse/hg19/chromSize/hg19.main.with_chrM.chrom.sizes
+--outputPrefix=GENCODEv25
+--up_end5Rng=500
+--dn_end5Rng=500
+--addon_length=500
+--merge_dist=-1
+--exon_slop_rng=-1
+--outDir=/Volumes/LaCie2TB_D/other_project/single_cell/F5_CAGE_Annotator/
+

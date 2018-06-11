@@ -1,0 +1,713 @@
+---
+title: "TGFbeta Timecourse C1 CAGE Analysis: WGCNA"
+author: "Andrew T. Kwon (taejun.kwon@riken.jp)"
+date: "May 30, 2018"
+output: 
+  html_document: 
+    keep_md: yes
+    number_sections: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(cache=TRUE)
+knitr::opts_knit$set(results='hide', warning=FALSE, message=FALSE)
+```
+
+# Overview
+
+Based on the normalized and batch-removed TGFbeta timecourse C1 CAGE data, we perform WGCNA to see how the promoters and enhnacers cluster together. We identify the major modules and compare their expression patterns according to the sample clusters and pseudotime. 
+
+---------
+
+# 1. Initial Set Up and Data Prepping
+
+## Library loading and parameter setting
+
+Load the necessary libraries and start process threading. Set the relevant file paths. We use the data from s3.
+
+```{r library_load, message=FALSE}
+
+library(tidyverse)
+
+library(scran)
+library(scater)
+library(WGCNA)
+allowWGCNAThreads()
+
+load("~/Projects/Molecular_Network/TGFbeta_Timecourse/results/R_sessions/s3_sample_clusters.RData")
+```
+
+Set the necessary WGCNA parameters.
+* mostly following the default WGCNA settings
+
+```{r wgcna_param}
+wgcna.params <- list()
+
+# network type, topological overlap options
+wgcna.params$networkType = 'signed'
+wgcna.params$TOMType = 'signed'
+
+# basic tree cut options
+wgcna.params$detectCutHeight = 0.995 # dendrogram cut height for module detection
+wgcna.params$deepSplit = 2 # (1,4) sensitivity for module splitting (4 = most sensitive)
+
+# We like large modules, so we set the minimum module size relatively high
+# there are too many small modules if we set to a relatively low numbers of 
+# module size
+# this can be change:
+wgcna.params$minModuleSize = 100 # min module size for detection
+
+# advanced tree cut options
+wgcna.params$pamStage = TRUE # 2nd PAM-like stage of module detection
+wgcna.params$pamRespectsDendro = FALSE
+
+# gene reassignment and trimming from modules
+# if a module does not contain at least wgcna.params$wgcna.params$minCoreKMESize genes with eigengene
+# connectivity of wgcna.params$minCoreKME, module is disbanded
+# genes with connectivity less than wgcna.params$minKMEtoStay are removed
+wgcna.params$minCoreKME = 0.5 
+wgcna.params$wgcna.params$minCoreKMESize = wgcna.params$minModuleSize / 3
+wgcna.params$minKMEtoStay = 0.3
+wgcna.params$reassignThreshold = 1e-6 # p-value ratio threshold for reassigning genes
+
+# At wgcna.params$mergeCutHeight = 0.25, for modules to merge, need correlation of 0.75
+# can be changed based on what modules to be merged
+wgcna.params$mergeCutHeight = 0.25
+```
+
+## Helper functions
+
+Let's set up a helper function to draw a smoothed eigengene plot for each module separately. These functions will also add a colour bar at the top of each plot to represent the cell states according to time, SC3 or TSCAN.
+
+```{r principle_components_single, fig.width=11, fig.height=7}
+# type = which annotation to add as the colour bar
+draw_wgcna_pc <- function(MEs, pd, type, lowY=-0.2, highY=0.2)
+{
+    marks <- table(pd[,type])
+    p <- list()
+    for (mod in colnames(MEs)) 
+    {
+        tab <- data.frame(pd, val=MEs[,mod])
+        tab <- tab[order(tab[,type]),]
+        if (type == 'tscan') {
+            tab <- tab[order(tab$pseudotime),]
+        }
+        marks <- table(pd[,type])
+        tab$Sample <- 1:nrow(MEs)
+        
+        p[[mod]] <- ggplot(tab, aes(x=Sample, y=val, group=1)) +
+            geom_smooth(colour=mod, span=0.3) + ylim(lowY, highY) +
+            geom_point(y=highY, aes(x=Sample, colour=tab[,type]), shape=15) + 
+            geom_hline(yintercept=0) + 
+            ggtitle(mod) + 
+            guides(color=guide_legend(title=type)) +
+            fontsize
+        prev <- 0
+        for (i in 1:(length(marks)-1))
+        {
+            p[[mod]] <- p[[mod]] + geom_vline(xintercept=marks[i] + prev, linetype='dashed')
+            prev <- prev + marks[i]
+        }
+    }
+    p
+}
+```
+
+## Data preparation
+
+Prepare the WGCNA input table. This should be a subset of the whole promoter/enhancer set.
+Use the pre-calculated expression variance table to select those with mean > 0.5 and |biological variatio|) > median.
+
+* We want to restrict ourselves to reasonably expressed set of promoters, as too many lowly-expressed ones will simply add noise.
+* WGCNA authors recommend against filtering by differential expression, but we do want to focus on those that show some variation in expression.
+
+```{r wgcna_input}
+
+# choose promoters that show some variation as the WGCNA input set
+wgcna.proms <- rownames(var.out)[abs(var.out$bio) >= median(abs(var.out$bio)) & var.out$mean >= median(var.out$mean) &  rownames(var.out) %in% rownames(sce)[!isSpike(sce)]]
+
+# make sure to include all TSCAN promoters
+wgcna.proms <- sort(union(wgcna.proms, tscan.proms))
+
+# to avoid confusion with functional analysis from minor promoters, restrict ourselves to the top most expressed promoter
+# per gene
+a <- dplyr::filter(annot, clusterID %in% wgcna.proms) %>% select(clusterID, clusterName, geneNameStr) %>% dplyr::mutate(sum=rowSums(norm_exprs(sce)[clusterID,])) %>% group_by(geneNameStr) %>% top_n(sum, n=1)
+wgcna.proms <- a$clusterID
+names(wgcna.proms) <- rowData(sce[wgcna.proms,])$clusterName
+
+wgcna.input <- t(norm_exprs(sce)[wgcna.proms,])
+
+# For better readability, let's rearrange the samples in the order of Timepoint, then by TSCAN clusters.
+tab <- tibble(Sample=colnames(sce), Timepoint=sce$Timepoint, tscan=sce$tscan)
+tab <- dplyr::arrange(tab, Timepoint, tscan)
+wgcna.input <- wgcna.input[tab$Sample,]
+
+# for convenience, set up colors again
+wgcna.cols <- list()
+wgcna.cols$Timepoint <- sample.colors$Timepoint[colData(sce)[rownames(wgcna.input),'Timepoint']]
+wgcna.cols$sc3 <- sample.colors$sc3[colData(sce)[rownames(wgcna.input),'sc3']]
+wgcna.cols$tscan <- sample.colors$tscan[colData(sce)[rownames(wgcna.input),'tscan']]
+
+#Before clustering, check for entries with too many missing values.
+
+gsg <- goodSamplesGenes(wgcna.input,verbose=3)
+
+# remove offending genes
+# I can just use gsg as input index
+if (!gsg$allOK)
+{
+	if (sum(!gsg$goodGenes) > 0)
+		printFlush(paste("Removing genes:", paste(names(wgcna.input)[!gsg$goodGenes], collapse=", ")));
+	if (sum(!gsg$goodSamples) > 0)
+		printFlush(paste("Removing samples:", paste(rownames(wgcna.input)[!gsg$goodSamples], collapse=", ")));
+	wgcna.input <- wgcna.input[gsg$goodSamples, gsg$goodGenes]
+}
+
+rm(gsg, tab, a)
+
+dim(wgcna.input)
+
+# wgcna.params$maxBlockSize set to 10000, as we have ~6000 promoters
+wgcna.params$maxBlockSize = 10000
+```
+
+We are left with `r ncol(wgcna.input)` rows, of which `r sum(rowData(sce[colnames(wgcna.input),])$type == 'enhancer')` are enhancers.
+
+## Initial data exploration with PCA
+
+Before we go any further, see how the samples cluster together with the filtered set of promoters as a sanity check.
+
+```{r PCA_filtered}
+res.pca <- FactoMineR::PCA(wgcna.input, scale.unit=TRUE, ncp=5, graph=F)
+
+FactoMineR::plot.PCA(res.pca, axes=c(1,2), choix='ind', col.ind=wgcna.cols$Timepoint, label='none', title='PCA: Filtered Samples')
+legend("topright", legend=names(sample.colors$Timepoint), col=sample.colors$Timepoint, pch=16, cex=0.6)
+```
+
+The PCA plot shows the expected distribution, with relatively good separation between t00 and t24, while t06 is mixed in between the two.
+
+If we look at the top (cos^2 cutoff of 0.3) contributing variables to the first 2 principle components:
+```{r graph_var_cos2}
+# which CAGE promoters get the top cosine values?
+dplyr::filter(annot, clusterID %in% rownames(res.pca$var$cos2)[apply(res.pca$var$cos2[,1:2], 1, sum) > 0.3])$clusterName
+
+rm(res.pca)
+```
+
+---------
+
+# 2. Network Building
+
+This is where the main WGCNA is performed. It is performed in a number of stages, from power parameter selection to intial clustering to merging of clusters. 
+
+## Threshold selection
+
+We first need to select the power threshold to ensure we get reasonable scale independence.
+```{r thresold_search, fig.width=10}
+#
+# a. Selection of power threshold
+#
+
+# choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from=12, to=20, by=2))
+
+# call the network topology analysis function
+sft <- pickSoftThreshold(wgcna.input, powerVector=powers, verbose=5)
+
+# plot the results
+par(mfrow=c(1,2))
+cex1 = 0.9
+
+# scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1],
+	 -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+	 xlab='Soft Threshold (power)', 
+	 ylab='Scale Free Topology Model Fit, signed R^2',
+	 type='n', main=paste('Scale Independence'))
+text(sft$fitIndices[,1],
+	 -sign(sft$fitIndices[,3])*sft$fitIndices[,2], labels=powers, 
+	 cex=cex1, col='red')
+abline(h=0.90, col='red')
+
+# mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5], 
+	 xlab='Soft Threshold (power)', ylab='Mean Connectivity', type='n',
+	 main=paste('Mean connectivity'))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, 
+	 cex=cex1, col='red')
+```
+
+Choosing the threshold of 5 should be satisfactory.
+
+```{r select_threshold}
+# selected power thresholds
+wgcna.params$softPower <- 5
+
+rm(sft, powers, cex1)
+```
+
+## Main WGCNA Computation
+
+Now to the main body of the calculations. The reference WGCNA pipeline produces many intermediate plots such as dendrograms, but we will skip those steps here.
+
+```{r rest_of_WGCNA_calculations}
+#
+# b. Module Clustering based on Topological Overlap Matrix (TOM)
+# - TOMs are saved in separate RData files for space/memory management
+# - adjacency and dissTOM (1-TOM) matrices are not kept
+#
+
+# Adjacency matrix
+adjacency <- adjacency(wgcna.input, power=wgcna.params$softPower, type=wgcna.params$networkType)
+
+# Topological Overlap Matrix (TOM)
+# Turn adjacency into topological overlap
+TOM <- TOMsimilarity(adjacency);
+colnames(TOM) <- colnames(adjacency)
+rownames(TOM) <- rownames(adjacency)
+
+dissTOM <- 1-TOM
+
+# Call the hierarchical clustering function
+peakTree <- hclust(as.dist(dissTOM), method="average");
+
+# Plot the resulting clustering tree (dendrogram)
+#pdf(file.path(dirs$manuscript, "p1_peakClustering.pdf"), height=10, width=15)
+#plot(peakTree, xlab="", sub="", main = "Peak clustering on TOM-based dissimilarity", labels = FALSE, hang = 0.04);
+#dev.off()
+
+# Module identification using dynamic tree cut:
+# try smaller wgcna.params$minModuleSize...
+#wgcna.params$minModuleSize = 100
+dynamicMods <- cutreeDynamic(dendro=peakTree, method="hybrid", distM=dissTOM, 
+							 cutHeight=wgcna.params$detectCutHeight, deepSplit=wgcna.params$deepSplit, 
+							 pamRespectsDendro=FALSE,
+							 minClusterSize=wgcna.params$minModuleSize, verbose = 2);
+
+table(dynamicMods)
+
+# Convert numeric lables into colors
+dynamicColors <- labels2colors(dynamicMods)
+table(dynamicColors)
+
+#
+# c. Merging of modules whose expression profiles are very similar
+#
+
+# Calculate eigengenes
+MEList <- moduleEigengenes(wgcna.input, colors=dynamicColors, softPower=wgcna.params$softPower, nPC=1)
+MEs = MEList$eigengenes
+rownames(MEs) <- rownames(wgcna.input)
+
+# Calculate dissimilarity of module eigengenes
+MEDiss <- 1-cor(MEs);
+
+# Cluster module eigengenes
+METree <- hclust(as.dist(MEDiss), method="average");
+
+# Call an automatic merging function
+merge = mergeCloseModules(wgcna.input, dynamicColors, cutHeight=wgcna.params$mergeCutHeight, verbose=3)
+
+# The merged module colors
+mergedColors = merge$colors;
+
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+
+table(mergedColors)
+
+#
+# In the subsequent analyses, we will use the merged module colors in 
+# mergedColors.
+#
+
+# Rename to moduleColors
+moduleColors = mergedColors
+names(moduleColors) = colnames(wgcna.input) # for convenience
+moduleNames <- unique(moduleColors)
+
+# free space
+rm(merge, dynamicColors, dynamicMods, mergedColors, peakTree, MEList, MEDiss, METree)
+rm(TOM)
+
+# Construct numerical labels corresponding to the colors
+# Note: label 0 and color grey are for unassigned genes
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+rownames(MEs) <- rownames(wgcna.input)
+rm(mergedMEs)
+
+# unique module names, in order of MEs
+colnames(MEs) = substring(names(MEs), 3)
+
+rm(colorOrder, moduleLabels)
+```
+
+---------
+
+# 3. Module inspection
+
+Now that the WGCNA modules have been created, let's look at their characteristics.
+
+## Module Sizes and Inter-Comparison
+
+First, the module sizes.
+```{r module_sizes, fig.width=6, fig.height=5}
+par(mfrow=c(1,1))
+barplot(sort(table(moduleColors)), 
+		col=names(sort(table(moduleColors))), 
+		cex=0.8, cex.axis=0.8, cex.lab=0.8, las=2,
+		main=paste0("WGCNA Module Sizes"),
+		ylab="Module Sizes")
+```
+
+We obtain 4 main modules, each with reasonable number of promoters. Our aggressive filtering based on variance and mean expression seems to have removed much noise. The turquoise is the largest. 
+
+How do the modules compare to each other?
+```{r eigengene_plots}
+
+# ME dendrogram + heatmap
+par(cex = 0.7)
+plotEigengeneNetworks(MEs, "", marDendro=c(0,4,1,13), marHeatmap=c(3,4,1,2), 
+					  printAdjacency=FALSE, cex.adjacency = 0.5, 
+					  plotPreservation="both", cex.preservation = 0.5)
+```
+
+## Principle Components: module eigengene profiles (representation profile )
+
+Module eigengene profiles show the representative behaviours of the features belonging to a given module across the samples. For better readability, let's sort the samples by Timepoint, then by TSCAN cluster.
+
+```{r principle_components_all, fig.width=8, fig.height=7}
+PCvalues <- MEs
+namesSamp <- as.character(rownames(wgcna.input))
+
+par(mar=c(7,4,3,2), las=2, cex.axis=0.7, cex.lab=0.7)
+ylim = c(signif(min(PCvalues), digits=1) - 0.1, signif(max(PCvalues), digits=1) + 0.1)
+plot(smooth.spline(PCvalues[,1],spar=0.4), xlab="", type="n", ylim=ylim, ylab="First Principal Component", axes=F, main=" Modules")
+
+for (mod in 1:length(PCvalues)) 
+{
+	lines(smooth.spline(PCvalues[,mod],spar=0.4), col=colnames(MEs)[mod], lwd=4)
+}
+rm(mod)
+
+abline(h=0)
+
+axis(1,at=1:length(namesSamp), labels=namesSamp)
+axis(2, at=seq(ylim[1], ylim[2], 0.1))
+legend("bottomright", colnames(MEs),fill=colnames(MEs), cex=0.5)
+
+rm(namesSamp, PCvalues, ylim)
+```
+
+This is rather confusing. Let's plot the profiles for each module separately, with the samples ordered according to the time points, TSCAN states or SC3 clusters. 
+**1) By Timepoint**
+```{r wgcna_plot_time, fig.width=10, fig.height=10, warning=FALSE}
+p <- draw_wgcna_pc(MEs=MEs, pd=colData(sce)[rownames(wgcna.input),], type='Timepoint')
+multiplot(plotlist=p, cols=2)
+```
+
+**2) By TSCAN**
+```{r wgcna_plot_tscan, fig.width=10, fig.height=10, warning=FALSE}
+p <- draw_wgcna_pc(MEs, colData(sce)[rownames(wgcna.input),], 'tscan')
+multiplot(plotlist=p, cols=2)
+```
+
+**3) SC3 Clustering**
+```{r wgcna_plot_cluster, fig.width=10, fig.height=10, warning=FALSE}
+p <- draw_wgcna_pc(MEs, colData(sce)[rownames(wgcna.input),], 'sc3')
+multiplot(plotlist=p, cols=2)
+```
+
+The yellow module shows the early peak at t00, and these likely represent those promoters responsible for the high G2M cell cycle scores in some cells we saw earlier. The brown module shows the latest peak in t24 samples, corresponding to the final TSCAN state, meaning these represent those promoters that are activated at the later stages of TGFbeta activation.
+
+## Promoter expression levels in each module
+
+Do any of the modules have very different spread of promoter expression?
+```{r module_expression_vioplot}
+
+tab <- reshape2::melt(t(wgcna.input))
+tab <- cbind(tab, module=moduleColors[tab$Var1])
+colnames(tab) <- c('promoter','sample','expression','module')
+
+
+p <- ggplot(tab, aes(module, expression))
+p + geom_violin(aes(fill=module)) + scale_fill_manual(values=levels(tab$module)) + geom_boxplot(width=0.1) + xlab('Modules') + ylab('Log2 Expression') + guides(fill=guide_legend(title='Modules'))
+
+rm(tab, p)
+```
+
+---------
+
+# 4. Module Connectivity Calculations
+
+We can now calculate the connectivity scores for each feature in each module. These scores represent how close each feature is to the eigengene profile of the module it belongs to. With these scores calcualted, we can save all the information in a single table.
+
+```{r connectivity}
+
+# connectivity: networkConcepts$ScaledConnectivity
+
+#
+# intramodularConnectivity
+# - calculate connectivity of nodes to other nodes within the same module
+#
+intraConnect <- intramodularConnectivity(adjacency, moduleColors,
+								  scaleByMax=FALSE)
+a = intramodularConnectivity(adjacency, moduleColors, scaleByMax=TRUE)
+intraConnect <- cbind(intraConnect, scaled_kWithin=as.numeric(a[,2]))
+rm(a)
+
+#rm(adjacency)
+
+#
+# Gene relationship to trait and important modules
+# - Module Membership
+# - KE information
+#
+
+nPeaks = ncol(wgcna.input);
+nSamples = nrow(wgcna.input);
+
+peakModuleMembership = as.data.frame(cor(wgcna.input, MEs, use = "p"));
+colnames(peakModuleMembership) <- paste0(colnames(peakModuleMembership), '.cor_coef')
+MMPvalue = as.data.frame(corPvalueStudent(as.matrix(peakModuleMembership), nSamples));
+colnames(MMPvalue) <- paste0(colnames(MMPvalue), '.pval')
+
+membership <- map(names(moduleColors), function(id) {
+    peakModuleMembership[id, grep(moduleColors[id], colnames(peakModuleMembership))]
+})
+membership <- unlist(membership)
+names(membership) <- names(moduleColors)
+
+pvals <- map(names(moduleColors), function(id) {
+    MMPvalue[id, grep(moduleColors[id], colnames(MMPvalue))]
+})
+pvals <- unlist(pvals)
+names(pvals) <- names(moduleColors)
+
+# save the information into a single table
+wgcna <- dplyr::filter(annot, clusterID %in% names(moduleColors))
+wgcna$module <- moduleColors[match(wgcna$clusterID, names(moduleColors))]
+wgcna$corr_eigengene <- membership
+wgcna$pvalue_eigengene <- pvals
+intraConnect$clusterID <- rownames(intraConnect)
+wgcna <- dplyr::left_join(wgcna, intraConnect, by='clusterID')
+
+rm(nPeaks, nSamples, membership, pvals, intraConnect)
+```
+
+---------
+
+# 5. Functional Analysis of the Modules
+
+What can we tell about each of the modules? From the eigengene plots, we can see that the brown, blue and turquoise modules are likely to contain genes responding to TGFbeta stimulation. For more in depth look, let's perform GO enrichment analysis and Gene Set Enrichment Analysis (GSEA)>
+
+## GO enrichment analysis
+With the associated Entrez IDs, perform GO enrichment using limma's goana function. To reduce spurious genes, we restrict ourselves to those that correlate with the eigengenes of the modules they belong to. 
+```{r GOstats, fig.width=11}
+universe <- wgcna$entrezgene_id
+universe <- sub('entrezgene:', '', universe)
+universe <- universe[!is.na(universe)] #14669
+
+entrez.subsets <- map(moduleNames, function(mod) {
+  genes <- dplyr::filter(wgcna, module %in% mod & pvalue_eigengene < 0.1 & abs(corr_eigengene) > 0.2) 
+  sub('entrezgene:', '', genes$entrezgene_id)
+})
+names(entrez.subsets) <- moduleNames
+
+# perform GO/KEGG analysis using limma
+# universe already set 
+go.subsets <- limma::goana(entrez.subsets, species='Hs', universe=universe, FDR=0.05)
+
+# for display purposes, insert \n for long names
+tabs <- map(moduleNames, function(mod) {limma::topGO(go.subsets, sort=mod, ontology='BP', number=10)})
+names(tabs) <- moduleNames
+tabs$brown$Term[5] <- "nuclear chromosome\nsegregation"
+tabs$brown$Term[8] <- "sister chromatid\nsegregation"
+tabs$yellow$Term[1] <- "ribonucleoprotein complex\nbiogenesis"
+tabs$yellow$Term[7] <- "riobosomal large subunit\nbiogenesis"
+tabs$yellow$Term[9] <- "establishment of integrated\nproviral latency"
+tabs$green$Term[1] <- "mitochondrial RNA 3'-end\nprocessing"
+tabs$green$Term[2] <- "cerebellar cortex\ndevelopment"
+tabs$green$Term[3] <- "macromolecule metabolic\nprocess"
+tabs$green$Term[4] <- "nitrogen compound\nmetabolic process"
+tabs$green$Term[5] <- "positive regulation of\ncalcium-dependent\nexocytosis"
+tabs$green$Term[6] <- "cerebellar coretex\nmorphogenesis"
+tabs$green$Term[8] <- "negative regulation of\ndevelopmental process"
+tabs$green$Term[9] <- "cellular macromolecule\nmetabolic process"
+tabs$blue$Term[6] <- "supramolecular fiber\norganization"
+tabs$blue$Term[8] <- "actin filament-based\nprocess"
+tabs$blue$Term[9] <- "regulation of\nsupramolecular fiber\norganization"
+tabs$turquoise$Term[1] <- "cardiac muscle tissue\ndevelopment"
+tabs$turquoise$Term[3] <- "cytokine biosynthetic\nprocess"
+tabs$turquoise$Term[4] <- "cytokine metabolic\nprocess"
+tabs$turquoise$Term[5] <- "positive regulation of lipid\nlocalization"
+tabs$turquoise$Term[6] <- "anatomical structure\nformation involved in\nmorphogenesis"
+tabs$turquoise$Term[9] <- "myeloid leukocyte\ndifferentiation"
+tabs$turquoise$Term[10] <- "multivesicular body\nassembly"
+
+# plot
+p.list <- map(c('brown','yellow','green','blue','turquoise'), function(mod) {
+  tab <- tabs[[mod]]
+  tab <- tab[,c('Term',paste0('P.', mod))]
+  colnames(tab) <- c('Term','p.value')
+  category <- factor(tab$Term)
+  ggplot(tab, aes(x=reorder(category, -log10(p.value)), y=-log10(p.value))) + geom_bar(stat='identity', color=mod, fill='white') + geom_text(label=tab$Term, lineheight=0.8, y=0.1, hjust=0, size=3) + theme_bw() + theme(axis.text.y=element_blank(), axis.ticks.x=element_blank()) + labs(x='', y='') + coord_flip()
+})
+scater::multiplot(plotlist=p.list, cols=5)
+
+# Fig3
+pdf(file.path(dirs$manuscript, "Fig3/wgcna_go_bp.pdf"), width=14)
+scater::multiplot(plotlist=p.list, cols=5)
+dev.off()
+```
+
+## Gene Set Enrichment Analysis 
+While GO enrichment analysis is good for its simplicity, it doesn't completely take advantage of the expression information we have available. The blue and turquoise modules correspond to TSCAN states 3 and 4, and the difference between the two is of high interest to us. Let's use GSEA to see if we can gather any other information. 
+
+We first load the gene sets from MSigDB.
+```{r load_misgdb, warning=FALSE}
+dirs$MSigDB <- "~/Projects/Data/MSigDB"
+
+load(file.path(dirs$MSigDB, "human_H_v5p2.rdata")) # hallmark gene sets
+load(file.path(dirs$MSigDB, "human_c2_v5p2.rdata")) # curated gene sets
+load(file.path(dirs$MSigDB, "human_c3_v5p2.rdata")) # motif gene sets
+load(file.path(dirs$MSigDB, "human_c5_v5p2.rdata")) # GO gene sets
+
+# for the curated set, only interested in the main ones
+curated <- map(c('REACTOME_','KEGG_','PID_','BIOCARTA_'), function(name) {
+  Hs.c2[grep(paste0("^", name), names(Hs.c2), perl=TRUE)]
+})
+names(curated) <- c('REACTOME','KEGG','PID','BIOCARTA')
+
+# let's chop up GO into individual categories: BP, CC and MF
+go.bp <- read_tsv(file.path(dirs$MSigDB, 'c5.bp.v6.1.entrez.gmt'), col_names=FALSE)$X1
+go.cc <- read_tsv(file.path(dirs$MSigDB, 'c5.cc.v6.1.entrez.gmt'), col_names=FALSE)$X1
+go.mf <- read_tsv(file.path(dirs$MSigDB, 'c5.mf.v6.1.entrez.gmt'), col_names=FALSE)$X1
+
+# also chop up motif into TFs and MIRs
+
+MSigDB <- list(hallmark=Hs.H, 
+               TFT=Hs.c3[-grep('MIR-', names(Hs.c3))], 
+               MIR=Hs.c3[grep('MIR-', names(Hs.c3))],
+               GO.BP=Hs.c5[names(Hs.c5) %in% go.bp],
+               GO.CC=Hs.c5[names(Hs.c5) %in% go.cc],
+               GO.MF=Hs.c5[names(Hs.c5) %in% go.mf])
+rm(Hs.H, Hs.c2, Hs.c3, Hs.c5, go.bp, go.cc, go.mf)
+
+MSigDB <- c(MSigDB, curated)
+```
+
+We are specifically interested in the genes belonging to blue and turquoise modules, representing TSCAN states 3 and 4. For this, we use limma's camera function, and set the design to be the contrast between the two TSCAN states of interest. 
+```{r gsea_blue_turquoise}
+# set up expression table and entrez ids
+
+# for the expression table, restrict to those in WGCNA and have entrez IDs
+entrez.ids <- wgcna$entrezgene_id[!is.na(wgcna$entrezgene_id)]
+entrez.ids <- gsub("entrezgene:", "", entrez.ids)
+exptab <- norm_exprs(sce)[wgcna$clusterID,]
+exptab <- exptab[!is.na(wgcna$entrezgene_id),]
+rownames(exptab) <- entrez.ids
+
+# now, the test set is those in blue and turquoise modules, with corr. coef. > 0.2 and p.val < 0.1
+entrez.ids <- unique(dplyr::filter(wgcna, module %in% c('blue','turquoise') & corr_eigengene > 0.2 & pvalue_eigengene < 0.1)$entrezgene_id)
+entrez.ids <- gsub("entrezgene:", "", entrez.ids)
+
+# for speed, go parallel
+# note: this was performed on MacOS. May need to set up differently on other OS.
+library(foreach)
+library(doParallel)
+cores_2_use <- detectCores() - 1
+cl <- makeCluster(cores_2_use)
+registerDoParallel(cl)
+
+design <- model.matrix(~tscan, data=colData(sce))
+
+camera.res <- foreach(no = 1:length(MSigDB), 
+                      .packages=c('purrr','limma','scater')) %dopar%
+{
+  i <- limma::ids2indices(MSigDB[[no]], entrez.ids)
+  index <- lapply(i, function(x) {which(rownames(exptab) %in% entrez.ids[x])})
+  camera.res <- limma::camera(exptab, index, design=design, contrast=c(0,0,-1,1), use.ranks=TRUE)
+  camera.res
+}
+stopCluster(cl)
+names(camera.res) <- names(MSigDB)
+
+# scan through top results
+map(camera.res, head)
+```
+
+We see a number of gene sets upregulated in TSCAN state 4 (turquoise), including Epithelial to Mesencymal transition. 
+
+---------
+
+# 6. Wrap Up and Examples
+
+Before we finish, let's save the WGCNA tables produced for later use.
+```{r save_files, eval=FALSE}
+write_tsv(wgcna, file.path(dirs$generated, "WGCNA/WGCNA.tsv"))
+```
+
+As a sanity check, let's see to which module the cell cycle markers belong to. 
+```{r example_pseudotime_plots}
+# sanity check: what module do the cell cycle markers belong to?
+cc.wgcna <- dplyr::filter(wgcna, clusterID %in% cc.markers)[,c('clusterName','corr_eigengene','pvalue_eigengene','module')]
+table(cc.wgcna$module)
+```
+As expected, most are in the brown module.
+
+For each module, let's pick some example genes for illustration.
+```{r module_example_plots, fig.width=10, fig.height=12}
+# let's pick example promoters for the modules
+markers <- c('p1@ALDH3A1','p1@CCNB2') # brown (early)
+markers <- c(markers, 'p1@SERPINE1','p1@KLF6') # blue (mid to late)
+markers <- c(markers, 'p1@SERPINE2','p1@FASN') # turquoise (early and late)
+markers <- c(markers, 'p1@VPS35','p1@HMGCS1') # yellow
+markers <- c(markers, 'p1@MYOCD','p1@CCNI') # green
+pseudotime_plot_by_ids(markers, id.type='clusterName')
+
+# these go into Fig 3
+pdf(file.path(dirs$manuscript, "Fig3/module_example_pseudotime.pdf"), height=10)
+pseudotime_plot_by_ids(markers, id.type='clusterName')
+dev.off()
+```
+
+How do some mesenchymal markers (CDH2 and VIM) appear in pseudotime plots and in bulk?
+```{r cdh2_vim_pseudotime, fig.width=10, fig.height=5}
+pseudotime_plot_by_ids(c('p1@CDH2','p1@VIM'), id.type='clusterName')
+dotplot_expression(c('p1@CDH2','p1@VIM'), id.type='clusterName')
+
+# manuscript Fig. S5
+pdf(file.path(dirs$manuscript, "FigS5/cdh2_vim_pseudotime.pdf"), fig.width=10, fig.height=5)
+pseudotime_plot_by_ids(c('p1@CDH2','p1@VIM'), id.type='clusterName')
+dotplot_expression(c('p1@CDH2','p1@VIM'), id.type='clusterName')
+dev.off()
+```
+
+From the oPOSSUM analysis of the WGCNA modules, we see that HINFP, TFAP2n, EGR1 motifs are enriched in turquoise module vs. others. How do their expression levels look?
+```{r turq_example_pseudotime_plots, fig.width=10, fig.height=12}
+# these are motifs that were enriched in turquoise vs. others
+pseudotime_plot_by_genes(c('HINFP','TFAP2A','TFAP2C','EGR1'))
+```
+
+While many of these are unclear, p1@TFAP2C shows an interesting behaviour, with clear drop in expression in later pseudotime. Along with KLF6, these two may represent opposing transcription activator/repressor pairings. Do the expression patterns hold in the bulk data as well?
+```{r klf6_tfap2c_pseudotime, fig.width=10, fig.height=5}
+pseudotime_plot_by_ids(c('p1@KLF6','p1@TFAP2C'), id.type='clusterName')
+dotplot_expression(c('p1@KLF6','p1@TFAP2C'), id.type='clusterName')
+
+# manuscript Fig. S6
+pdf(file.path(dirs$manuscript, "FigS6/klf6_tfap2c_pseudotime.pdf"), height=4)
+pseudotime_plot_by_ids(c('p1@KLF6','p1@TFAP2C'), id.type='clusterName')
+dotplot_expression(c('p1@KLF6','p1@TFAP2C'), id.type='clusterName')
+dev.off()
+```
+It appears so.
+
+```{r cleanup, include=FALSE}
+rm(wgcna.input, adjacency, dissTOM, peakModuleMembership, MMPvalue, cc.wgcna, mod_corr)
+```
+
+
