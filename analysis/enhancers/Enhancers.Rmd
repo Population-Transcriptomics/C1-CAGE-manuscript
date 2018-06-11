@@ -185,7 +185,7 @@ z$t <- gsub('t','',z$lib)
   +scale_fill_discrete(guide = guide_legend(title = NULL))
   +scale_y_continuous(labels = c(0,25,50,75,100))
   )
-ggsave('../manuscript/Fig5/chr20_direction_cage.pdf', width = 4, height = 3, units='in')
+ggsave('../../manuscript/Fig5/chr20_direction_cage.pdf', width = 4, height = 3, units='in')
 
 
 z <- cage.plot[ID %in% c('ADDG10003929991.E', 'ADDG17048105016.E', 'ADDG20056293544.E') & type=='BULK', 
@@ -241,7 +241,7 @@ z$lib <- factor(z$lib, levels = z[, .(maxpos=.SD[order(-i.score)][1, readpos]),b
   +scale_y_discrete(labels=NULL)
   +theme_bw()
     )
-ggsave('enh_expand.pdf', path='../manuscript/Fig4/', width = 6, height = 4, units = 'in')
+ggsave('enh_expand.pdf', path='../../manuscript/Fig4/', width = 6, height = 4, units = 'in')
 
 z[i.strand=='-', i.score:= -i.score]
 (ggplot(z, aes(readpos, fill=i.strand, weight=i.score))
@@ -253,7 +253,7 @@ z[i.strand=='-', i.score:= -i.score]
   +ylab("Reads (pooled)")
   +theme_bw()
     )
-ggsave('enh_pooled.pdf', path='../manuscript/Fig4/', width = 6, height = 2, units = 'in')
+ggsave('enh_pooled.pdf', path='../../manuscript/Fig4/', width = 6, height = 2, units = 'in')
 
 #id1 <- cage.plot[i.strand=='+', .(n=length(unique(lib))), by=.(ID,type)][n>30 & type=='C1', ID]
 #id2 <- cage.plot[i.strand=='-', .(n=length(unique(lib))), by=.(ID,type)][n>30 & type=='C1', ID]
@@ -298,7 +298,7 @@ z <- cage.plot[, .(score=sum(i.score), ids=length(unique(ID)) ,n=length(unique(I
   +ylab('Fraction of enhancers')
   +xlim(c(-500,500))
   )
-ggsave('enh_filtered_reads.pdf', path='../manuscript/Fig4/', width = 5, height = 2.5, units = 'in')
+ggsave('enh_filtered_reads.pdf', path='../../manuscript/Fig4/', width = 5, height = 2.5, units = 'in')
 ```
 
 # NIH Roadmap epigenome data
@@ -378,7 +378,7 @@ z <- rbindlist(list(z, z2))
   +guides(colour=guide_legend(title = NULL))
   #+facet_wrap(~mark, ncol=1, scales='free_y')
     )
-ggsave('enh_p300_epigenome.pdf', path='../manuscript/Fig4/', width = 5.5, height = 2.5, units = 'in')
+ggsave('enh_p300_epigenome.pdf', path='../../manuscript/Fig4/', width = 5.5, height = 2.5, units = 'in')
 
 rm(z)
 ```
@@ -403,7 +403,7 @@ epig.plot <- rbindlist(list(epig1.plot, epig2.plot))
 
 ggplot(epig.plot[bin > 124 & bin < 176], aes(bin, generank))+facet_wrap(~type, scales = 'free_y')+geom_raster(aes(fill=value), interpolate = F)+scale_y_discrete(NULL,labels=NULL)+
   scale_fill_gradient(low = "white", high = "black", guide_legend(title = 'DNase\nSignal')) +scale_x_continuous(labels = c(-500, 0, 500), breaks = c(125,150,175)) +xlab('Position relative to enhancer midpoint')
-ggsave('enh_p300_dnase.pdf', path='../manuscript/Fig4/', width = 5, height = 4, units = 'in')
+ggsave('enh_p300_dnase.pdf', path='../../manuscript/Fig4/', width = 5, height = 4, units = 'in')
     
 #epig <- epig[geneID %in% cage.plot$ID]          
 #epig.sums <- epig[, .(n=sum(value)), by=.(geneID, mark)]

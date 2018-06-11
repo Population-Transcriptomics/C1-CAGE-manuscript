@@ -574,7 +574,7 @@ counts.add <- rbind(counts[,sc_idx_456], total - colsum)
 
 x.all <- hanabi(counts.add)
 plot(x.all, xlab = 'Read count', ylab='Genes detected', main='')
-pdf('../manuscript/Fig2/hanabi.pdf', height = 4, width = 5)
+pdf('../../manuscript/Fig2/hanabi.pdf', height = 4, width = 5)
 plot(x.all, xlab = 'Read count', ylab='Genes detected', main='', xaxt = "n")
 axis(side=1, at=c(0, 1e+6, 2e+6, 3e+6),labels=expression(0, 1%*%10^6, 2%*%10^6, 3%*%10^6)) 
 dev.off()
@@ -704,7 +704,7 @@ xx[type == 'enhancer RNA', type := 'Enhancer']
   +scale_x_discrete(labels=bin_labs)
   +scale_color_brewer(palette="Accent")
   )
-ggsave('cf_bulk_frac.pdf', path='../manuscript/Fig4/', height = 3, width = 5, units = 'in')
+ggsave('cf_bulk_frac.pdf', path='../../manuscript/Fig4/', height = 3, width = 5, units = 'in')
 
 (ggplot(x[!bin %in% c('6','7', '8') ], aes(bin, pc*100, colour=type))
   +geom_boxplot()

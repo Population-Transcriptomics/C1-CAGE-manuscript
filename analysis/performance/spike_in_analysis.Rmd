@@ -277,7 +277,7 @@ m
                                  as.character(as.expression(substitute(R^2==x, list(x=format(m, digits = 2))))))
 , mapping = aes(lfc, ratio, label=text), parse = T)
   )
-ggsave('ERCC_fc.pdf', path='../manuscript/Fig1/', width = 2.6, height=2.6, units='in')
+ggsave('ERCC_fc.pdf', path='../../manuscript/Fig1/', width = 2.6, height=2.6, units='in')
 
 ```
 
@@ -389,7 +389,7 @@ wrapTTest(tt1)
   +geom_signif(comparisons = list(c("C1 CAGE\n(279)", "C1 STRT\n(96)")),
                map_signif_level = F, textsize=4, margin_top = 0.12)
   )
-ggsave('ERCC_acc.pdf', path='../manuscript/Fig1/', width = 2.6, height=2.8, units='in')
+ggsave('ERCC_acc.pdf', path='../../manuscript/Fig1/', width = 2.6, height=2.8, units='in')
 
 tt2 <- t.test(df[variable=='sensitivity' & method == 'C1 CAGE\n(279)', value], df[variable=='sensitivity' & method == 'C1 STRT\n(96)', value])
 tt2
@@ -409,7 +409,7 @@ wrapTTest(tt2)
   +geom_signif(comparisons = list(c("C1 CAGE\n(279)", "C1 STRT\n(96)")),
                map_signif_level = F, textsize=4, margin_top = 0.09)
   )
-ggsave('ERCC_mol.pdf', path='../manuscript/Fig1/', width = 2.6, height=2.8, units='in')
+ggsave('ERCC_mol.pdf', path='../../manuscript/Fig1/', width = 2.6, height=2.8, units='in')
 
 
 
