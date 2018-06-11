@@ -226,7 +226,7 @@ setnames(df, c('mean','sc_stat'), c('single cell mean','pooled'))
   +geom_errorbarh(data = df, mapping = aes(y=dpi, xmax = `single cell mean` + se, xmin = `single cell mean` - se, height = .2))
   +scale_color_brewer(palette="Set1")
     )
-ggsave('sc_direction.pdf', path='../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
+ggsave('sc_direction.pdf', path='../../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
 #ggsave('tmp2.pdf', path='~/Downloads/', width = 6, height = 4.5, units = 'in')
 
 # 826 - Andrew's filtering
@@ -248,7 +248,7 @@ df2$dpi <- factor(df2$dpi, levels = dpi_order)
   #+guides(colour=guide_legend(title = 'cells'))
   +theme_bw()
   )
-ggsave('sc_direction_heatmap.pdf', path='../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
+ggsave('sc_direction_heatmap.pdf', path='../../manuscript/Fig4/', width = 6, height = 4.5, units = 'in')
 
 
 # balanced

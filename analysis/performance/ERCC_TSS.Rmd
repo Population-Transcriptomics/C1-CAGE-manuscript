@@ -105,7 +105,7 @@ b[, pc := (n/sum(n))*100]
  +scale_x_continuous(labels = c(1:20, '>20'), breaks = 1:21)
  +ylim(0,80)
 )
-ggsave('ERCC_5p.pdf', path='../manuscript/Fig1/')
+ggsave('ERCC_5p.pdf', path='../../manuscript/Fig1/')
 
 ```
 

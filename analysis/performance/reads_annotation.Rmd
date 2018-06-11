@@ -86,7 +86,7 @@ df[,.(pc=mean(pc)) , by=.(type)]
   +xlab('Annotation')
   +theme(plot.margin = unit(c(0.3,1,0.3,0.3), "cm"))
 )
-#ggsave('reads_anno_1.pdf', path='../manuscript/Fig1/')
+#ggsave('reads_anno_1.pdf', path='../../manuscript/Fig1/')
 
 df$group <- 'other'
 df[type %in% c('intron', 'exon')]$group <- 'gene body'
@@ -101,7 +101,7 @@ df[type %in% c('promoter', 'enhancer')]$group <- 'cage cluster'
   +theme(plot.margin = unit(c(0.3,1,0.3,0.3), "cm"))
   +facet_grid(group~., scales='free_y', space='free_y')
 )
-ggsave('reads_anno_2.pdf', path='../manuscript/Fig2/', height = 3, width = 4, units = 'in')
+ggsave('reads_anno_2.pdf', path='../../manuscript/Fig2/', height = 3, width = 4, units = 'in')
 ```
 
 ```{r anno_exon, fig.height=2.5, fig.width=5, eval=F}
@@ -114,6 +114,6 @@ df
   +xlab('Gene type')
   +ylab('reads')
 )
-#ggsave('reads_anno_2.pdf', path='../manuscript/Fig1/')
+#ggsave('reads_anno_2.pdf', path='../../manuscript/Fig1/')
 ```
 
